@@ -1,0 +1,664 @@
+                                            OneTrans: Unified Feature Interaction and Sequence Modeling
+                                                 with One Transformer in Industrial Recommender
+                                                             Zhaoqi Zhang∗                                                      Haolei Pei∗                                      Jun Guo∗
+                                                Nanyang Technological University                                             ByteDance                                         ByteDance
+                                                          ByteDance                                                    Singapore, Singapore                               Singapore, Singapore
+                                                     Singapore, Singapore                                            haolei.pei@bytedance.com                           jun.guo@bytedance.com
+                                                 zhaoqi.zhang@bytedance.com
+
+                                                              Tianyu Wang                                                       Yufei Feng                                        Hui Sun
+                                                            ByteDance                                                       ByteDance                                         ByteDance
+                                                       Singapore, Singapore                                              Hangzhou, China                                  Hangzhou, China
+arXiv:2510.26104v1 [cs.IR] 30 Oct 2025
+
+
+
+
+                                                  tianyu.wang01@bytedance.com                                        fengyihui@bytedance.com                         sunhui.sunh@bytedance.com
+
+                                                                                              Shaowei Liu†                                            Aixin Sun†
+                                                                                          ByteDance                                      Nanyang Technological University
+                                                                                     Singapore, Singapore                                     Singapore, Singapore
+                                                                              liushaowei.nphard@bytedance.com                                  axsun@ntu.edu.sg
+
+                                         Abstract                                                                                        Keywords
+                                         In recommendation systems, scaling up feature-interaction mod-                                  Recommender System, Ranking Model, Scaling Laws
+                                         ules (e.g., Wukong, RankMixer) or user-behavior sequence modules                                ACM Reference Format:
+                                         (e.g., LONGER) has achieved notable success. However, these ef-                                 Zhaoqi Zhang, Haolei Pei, Jun Guo, Tianyu Wang, Yufei Feng, Hui Sun,
+                                         forts typically proceed on separate tracks, which not only hinders                              Shaowei Liu, and Aixin Sun. 2025. OneTrans: Unified Feature Interaction
+                                         bidirectional information exchange but also prevents unified op-                                and Sequence Modeling with One Transformer in Industrial Recommender.
+                                         timization and scaling. In this paper, we propose OneTrans, a                                   In Proceedings of Make sure to enter the correct conference title from your
+                                         unified Transformer backbone that simultaneously performs user-                                 rights confirmation email (Conference acronym ’XX). ACM, New York, NY,
+                                         behavior sequence modeling and feature interaction. OneTrans                                    USA, 9 pages.
+                                         employs a unified tokenizer to convert both sequential and non-
+                                         sequential attributes into a single token sequence. The stacked                                 1    Introduction
+                                         OneTrans blocks share parameters across similar sequential to-                                  Recommendation systems (RecSys) play a fundamental role in vari-
+                                         kens while assigning token-specific parameters to non-sequential                                ous information services, such as e-commerce [9, 31], streaming me-
+                                         tokens. Through causal attention and cross-request KV caching,                                  dia [2, 19, 26] and social networks [28]. Industrial RecSys generally
+                                         OneTrans enables precomputation and caching of intermediate                                     adopt a cascaded ranking architecture [6, 16, 21]. First, a recall stage
+                                         representations, significantly reducing computational costs during                              selects hundreds of candidates from billion-scale corpora [13, 32].
+                                         both training and inference. Experimental results on industrial-                                Then, a ranking stage — often with coarse- and fine-ranking —
+                                         scale datasets demonstrate that OneTrans scales efficiently with                                scores each candidate and returns the top-𝑘 items [11, 25, 26, 28, 33].
+                                         increasing parameters, consistently outperforms strong baselines,                                  We focus on the ranking stage in this paper. For ranking, main-
+                                         and yields a 5.68% lift in per-user GMV in online A/B tests.                                    stream approaches iterate on two separate modules: (a) sequence
+                                                                                                                                         modeling, which encodes user multi-behavior sequences into candidate-
+                                         CCS Concepts                                                                                    aware representations using local attention or Transformer en-
+                                                                                                                                         coders [1, 14, 23, 31], and (b) feature interaction, which learns high-
+                                         • Information systems → Recommender systems.
+                                                                                                                                         order crosses among non-sequential features (e.g., user profile,
+                                         ∗ These authors contributed equally.
+                                                                                                                                         item profile, and context) via factorization or explicit cross net-
+                                         † Corresponding author.                                                                         works, or attention over feature groups [11, 12, 25, 33]. As shown
+                                                                                                                                         in Fig. 1(a), these approaches typically encode user behaviors into
+                                                                                                                                         a compressed sequence representation, then concatenate it with
+                                         Permission to make digital or hard copies of all or part of this work for personal or
+                                         classroom use is granted without fee provided that copies are not made or distributed           non-sequential features and apply a feature-interaction module
+                                         for profit or commercial advantage and that copies bear this notice and the full citation       to learn higher-order interaction; we refer to this design as the
+                                         on the first page. Copyrights for components of this work owned by others than the              encode-then-interaction pipeline.
+                                         author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+                                         republish, to post on servers or to redistribute to lists, requires prior specific permission      The success of large language models (LLMs) demonstrates that
+                                         and/or a fee. Request permissions from permissions@acm.org.                                     scaling model size (e.g., parameter size, training data) yields pre-
+                                         Conference acronym ’XX, Woodstock, NY                                                           dictable gains in performance [15], inspiring similar investigations
+                                         © 2025 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+                                         ACM ISBN 978-1-4503-XXXX-X/18/06                                                                within RecSys [1, 28, 33]. For feature interaction, Wukong [28]
+                                                                                                                                         stacks Factorization Machine blocks with linear compression to
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                                                                                    Zhang et al.
+
+
+              Multi-task Tower                             Multi-task Tower
+                                                                                              Particularly, cross-candidate and cross-request KV caching [1] re-
+                                                                                              duces the time complexity from 𝑂 (𝐶) to 𝑂 (1) for sessions with 𝐶
+          Feature Interaction Block                                                           candidates, making large-scale OneTrans deployment feasible.
+                                                          OneTrans Stack
+                                                                                                 In summary, our main contributions are fourfold: (1) Unified
+     Compressed Seq                                                                           framework. We present OneTrans, a single Transformer back-
+ Sequence Modeling Block
+                                                                                              bone for ranking, equipped with a unified tokenizer that encodes
+                                                               Tokenizer
+                                                                                              sequential and non-sequential features into one token sequence, and
+   Sequential Features       Non-Seq Features   Sequential Features        Non-Seq Features
+                                                                                              a unified Transformer block that jointly performs sequence modeling
+     (a) Conventional Approach                             (b) OneTrans                       and feature interaction. (2) Customization for recommenders.
+                                                                                              To bridge the gap between LLMs and RecSys tasks, OneTrans
+Figure 1: Architectural comparison. (a) Conventional encode-                                  introduces a mixed parameterization that allocates token-specific
+then-interaction pipeline encodes sequential features and                                     parameters to diverse non-sequential tokens while sharing param-
+merges non-sequential features before a post-hoc feature                                      eters for all sequential tokens. (3) Efficient training and serving.
+interaction block. (b) OneTrans performs joint modeling of                                    We improve efficiency with a pyramid strategy that progressively
+both sequential and non-sequential features within a single                                   prunes sequential tokens and a cross-request KV Caching that reuses
+OneTrans (Transformer-style) stack.                                                           user-side computations across candidates. In addition, we adopt
+                                                                                              LLM optimizations such as FlashAttention, mixed-precision train-
+                                                                                              ing, and half-precision inference to further reduce memory and
+                                                                                              compute. (4) Scaling and deployment. OneTrans demonstrates
+                                                                                              near log-linear performance gains with increased model size, pro-
+capture high-order feature interactions and establishes scaling laws,                         viding evidence of a scaling law in real production data. When
+while RankMixer [33] achieves favorable scaling through hardware-                             deployed online, it achieves statistically significant lifts on business
+friendly token-mixing with token-specific feed-forward networks                               KPIs while maintaining production-grade latency.
+(FFNs). For sequence modeling, LONGER[1] applies causal Trans-
+formers to long user histories and shows that scaling depth and
+width yields monotonic improvements. Although effective in prac-                              2    Related Work
+tice, separating sequence modeling and feature interaction as in-                             Early RecSys like DIN [31] and its session-aware variants (DSIN) [9]
+dependent modules introduces two major limitations. First, the                                use local attention to learn candidate-conditioned summaries of
+encode-then-interaction pipeline restricts bidirectional information                          user histories, but compress behaviors into fixed-length vectors
+flow, limiting how static/context features shape sequence represen-                           per candidate, limiting long-range dependency modeling [30]. Self-
+tations [27]. Second, module separation fragments execution and                               attentive methods like SASRec [14], BERT4Rec [23], and BST [4]
+increases latency, whereas a single Transformer-style backbone                                eliminate this bottleneck by letting each position attend over the
+can reuse LLM optimizations e.g., KV caching, memory-efficient                                full history and improve sample efficiency with bidirectional mask-
+attention, and mixed precision, for more effective scaling [11].                              ing. Recently, as scaling laws [15] in RecSys are increasingly ex-
+   In this paper, we propose OneTrans, an innovative architec-                                plored, LONGER [1] pushes sequence modeling toward industrial
+tural paradigm with a unified Transformer backbone that jointly                               scales by targeting ultra-long behavioral histories with efficient
+performs user-behavior sequence modeling and feature interaction.                             attention and serving-friendly designs. However, in mainstream
+As shown in Fig. 1(b), OneTrans enables bidirectional informa-                                pipelines these sequence encoders typically remain separate from
+tion exchange within the unified backbone. It employs a unified                               the feature-interaction stack, leading to late fusion rather than joint
+tokenizer that converts both sequential features (diverse behav-                              optimization with static contextual features [27].
+ior sequences) and non-sequential features (static user/item and                                 On the feature-interaction side, early RecSys rely on manually en-
+contextual features) into a single token sequence, which is then                              gineered cross-features or automatic multiplicative interaction lay-
+processed by a pyramid of stacked OneTrans blocks, a Transformer                              ers. Classical models such as Wide&Deep [5], FM/DeepFM [3, 12],
+variant tailored for industrial RecSys. To accommodate the diverse                            and DCN/DCNv2 [24, 25] provide efficient low-order or bounded-
+token sources in RecSys, unlike the text-only tokens in LLMs, each                            degree interactions. However, as recent scaling studies observe [28],
+OneTrans block adopts a mixed parameterization similar to Hi-                                 once the model stacks enough cross layers, adding more stops help-
+Former [11]. Specifically, all sequential tokens (from sequential                             ing: model quality plateaus instead of continuing to improve. To
+features) share a single set of Q/K/V and FFN weights, while each                             overcome the rigidity of preset cross forms, attention-based ap-
+non-sequential token (from non-sequential features) receives token-                           proaches automatically learn high-order interactions. AutoInt [22]
+specific parameters to preserve its distinct semantics.                                       learns arbitrary-order relations, and HiFormer [11] introduces group-
+   Unlike conventional encode-then-interaction frameworks, One-                               specific projections to better capture heterogeneous, asymmet-
+Trans eliminates the architectural barrier between sequential and                             ric interactions. With scaling up increasingly applied to feature-
+non-sequential features through a unified causal Transformer back-                            interaction modules, large-scale systems such as Wukong [28] demon-
+bone. This formulation brings RecSys scaling in line with LLM                                 strate predictable gains by stacking FM-style interaction blocks with
+practices: the entire model can be scaled by adjusting backbone                               linear compression, while RankMixer [33] achieves favorable scal-
+depth and width, while seamlessly inheriting mature LLM optimiza-                             ing via parallel token mixing and sparse MoE under strict latency
+tions, such as FlashAttention [7], and mixed precision training [17].                         budgets. However, these interaction modules typically adhere to the
+OneTrans: Unified Feature Interaction and Sequence Modeling with One Transformer in Industrial Recommender                      Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+                                                                           Task Tower                                                         Mix FFN
+                                                                                                                 Output
+
+
+
+                                                                                                                    +
+    OneTrans Pyramid Stack                                           OneTrans Block x N                                                              FFN      FFN                 FFN
+                                                                                                                Mix FFN
+
+
+
+                                                                                                               RMSNorm
+                                                    OneTrans Block x N
+
+                                                                                                                                               Mix Causal Attention
+                                                                                                                    +
+
+                                    OneTrans Block x N                                                            Mix
+                                                                                               Pos Emb
+                                                                                                             Causal Attention
+                                                                                                                                                           Multi Head Attention
+
+                 SEP                          SEP
+                                                                                                               RMSNorm                              QKV     QKV               QKV
+                                                          S tokens                 NS tokens
+                       Sequential Tokenizer                              Non-Seq Tokenizer
+
+                                                                                                  xN
+                                                                                                               NS/S tokens
+
+
+
+                                 (a) OneTrans Framework                                                   (b) OneTrans Block                            (c) Mix Parameterization
+
+
+Figure 2: System Architecture. (a) OneTrans overview. Sequential (S, blue) and non-sequential (NS, orange) features are
+tokenized separately. After inserting [SEP] between user behavior sequences, the unified token sequence is fed into stacked
+OneTrans Pyramid Blocks that progressively shrink the token length until it matches the number of NS tokens. (b) OneTrans
+Block: a causal pre-norm Transformer Block with RMSNorm, Mixed Causal Attention and Mixed FFN. (c) “Mixed” = mixed
+parameterization: S tokens share one set of QKV/FFN weights, while each NS token receives its own token-specific QKV/FFN.
+
+
+interaction paradigm, which pushes interactions to a separate stage                                      N S to NS-tokens. A pyramid-stacked Transformer then consumes
+and blocks unified optimization with user sequence modeling [27].                                        the unified token sequence jointly within a single computation
+   To date, progress in RecSys has largely advanced along two                                            graph. We denote the initial token sequence as
+independent tracks: sequence modeling and feature interaction.
+                                                                                                                   X (0) = S-tokens ; NS-tokens ∈ R (𝐿S +𝐿NS ) ×𝑑 .
+                                                                                                                                               
+                                                                                                                                                                     (3)
+InterFormer [27] attempts to bridge this gap through a summary-
+based bidirectional cross architecture that enables mutual signal                                        This token sequence is constructed by concatenating 𝐿S number
+exchange between the two components. However, it still maintains                                         of S-tokens and 𝐿NS number of NS-tokens, with all tokens having
+them as separate modules, and the cross architecture introduces                                          dimensionality 𝑑. Note that, the S-tokens contain learnable [SEP]
+both architectural complexity and fragmented execution. Without                                          tokens inserted to delimit boundaries between different kind of
+a unified backbone for joint modeling and optimization, scaling the                                      user-behavior sequences. As shown in Fig. 2(b), each OneTrans
+system as an integrated whole remains challenging.                                                       block progressively refines the token states through:
+                                                                                                                                                     
+                                                                                                                   Z (𝑛) = MixedMHA Norm X (𝑛−1) + X (𝑛−1) ,            (4)
+3     Methodology                                                                                                                                  
+                                                                                                                   X (𝑛) = MixedFFN Norm Z (𝑛) + Z (𝑛) .
+                                                                                                                                                  
+Before detailing our method, we briefly describe the task setting.                                                                                                      (5)
+In a cascaded industrial RecSys, each time the recall stage returns a
+candidate set (typically hundreds of candidate items) for a user 𝑢.                                      Here, MixedMHA (Mixed Multi-Head Attention) and MixedFFN
+The ranking model then predicts a score to each candidate item 𝑖:                                        (Mixed Feed-Forward Network) adopt a mixed parameterization
+                                                                                                         strategy (see Fig. 2(c)) sharing weights across sequential tokens,
+                       𝑦ˆ𝑢,𝑖 = 𝑓 𝑖 N S, S; Θ
+                                             
+                                                                  (1)                                    while assigning separate parameters to non-sequential tokens in
+where N S is a set of non-sequential features derived from the                                           both the attention and feed-forward layers.
+user, the candidate item, and the context; S is a set of historical                                         A unified causal mask enforces autoregressive constraints, re-
+behavior sequences from the user; and Θ are trainable parameters.                                        stricting each position to attend only to preceding tokens. Specifi-
+Common task predictions include the click-through rate (CTR) and                                         cally, NS-tokens are permitted to attend over the entire history of
+the post-click conversion rate (CVR).                                                                    S-tokens, thereby enabling comprehensive cross-token interaction.
+                                                                                                         By stacking such blocks with pyramid-style tail truncation applied
+            CTR𝑢,𝑖 = 𝑃 click = 1 N S, S; Θ ,
+                                           
+                                                                (2)                                      to S-tokens, the model progressively distills compact high-order
+            CVR𝑢,𝑖 = 𝑃 conv = 1 click = 1, N S, S; Θ .
+                                                     
+                                                                                                         information into the NS-tokens. The final token states are then
+                                                                                                         passed to task-specific heads for prediction.
+3.1     OneTrans Framework Overview                                                                         By unifying non-sequential and sequential features into a uni-
+As illustrated in Fig. 2(a), OneTrans employs a unified tokenizer that                                   fied token sequence and modeling them with a causal Transformer,
+maps sequential features S to S-tokens, and non-sequential features                                      OneTrans departs from the conventional encode-then-interaction
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                                                                       Zhang et al.
+
+
+pipeline. This unified design naturally enables (i) intra-sequence          sequences by event impact, e.g., purchase → add-to-cart → click,
+interactions within each behavior sequence, (ii) cross-sequence in-         inserting learnable [SEP] tokens between sequences. In the latter,
+teractions across multiple sequences, (iii) multi-source feature inter-     behaviors with higher user intent are placed earlier in the sequence.
+actions among item, user, and contextual features, and (iv) sequence-       Ablation results indicate that, when timestamps are available, the
+feature interactions, all within a single Transformer stack.                timestamp-aware rule outperforms the impact-ordered alternative.
+   The unified formulation enables us to seamlessly inherit mature          Formally, we have:
+LLM engineering optimizations, including KV caching and memory-                                                                     𝑛
+                                                                                                                                   ∑︁
+efficient attention, thereby substantially reducing inference latency.       S-Tokens = Merge S̃1, . . . , S̃𝑛 ∈ R𝐿𝑆 ×𝑑 ,
+                                                                                                              
+                                                                                                                            𝐿𝑆 =         𝐿𝑖 + 𝐿SEP . (10)
+We argue this unified formulation is well suited to tackling multi-                                                                𝑖=1
+sequence and cross-domain recommendation challenges in a single,
+and scalable architecture. Next, we detail the design.                      3.3     OneTrans Block
+                                                                            As shown in Fig. 2(b), each OneTrans block is a pre-norm causal
+3.2     Features and Tokenization                                           Transformer applied to a normalized token sequence: 𝐿𝑆 sequential
+To construct the initial token sequence X (0) , OneTrans first applies      S-tokens, followed by 𝐿𝑁 𝑆 non-sequential NS-tokens. Inspired by
+a feature preprocessing pipeline that maps all raw feature inputs           the findings on heterogeneous feature groups [11], we make a light-
+into embedding vectors. These embeddings are then partitioned into          weight modification to Transformer to allow a mixed parameter
+(i) a multi-behavior sequential subset and (ii) a non-sequential subset     scheme, see Fig. 2(c). Specifically, homogeneous S-tokens share
+representing user, item, or context features. Separate tokenizers are       one set of parameters. The NS-tokens, being heterogeneous across
+applied to each subset.                                                     sources/semantics, receive token-specific parameters.
+                                                                               Unlike LLM inputs, the token sequence in RecSys combines se-
+3.2.1 Non-Sequential Tokenization. Non-sequential features N S              quential S-tokens with diverse NS-tokens whose value ranges and
+include both numerical inputs (e.g., price, CTR) and categorical in-        statistics differ substantially. Post-norm setups can cause atten-
+puts (e.g., user ID, item category). All features are either bucketized     tion collapse and training instability due to these discrepancies. To
+or one-hot encoded and then embedded. Since industrial systems              prevent this, we apply RMSNorm [29] as pre-norm to all tokens,
+typically involve hundreds of features with varying importance,             aligning scales across token types and stabilizing optimization.
+there are two options for controlling the number of non-sequential
+tokens, denoted by 𝐿𝑁 𝑆 :                                                   3.3.1 Mixed (shared/token-specific) Causal Attention. OneTrans
+Group-wise Tokenizer (aligned with RankMixer [33]). Features                adopts a standard multi-head attention (MHA) with a causal at-
+are manually partitioned into semantic groups {g1, . . . , g𝐿𝑁 𝑆 }. Each    tention mask; the only change is how Q/K/V are parameterized.
+group is concatenated and passed through a group-specific MLP:              Let x𝑖 ∈ R𝑑 be the 𝑖-th token. To compute Q/K/V, we use a shared
+                                                                          projection for S-tokens (𝑖 ≤ 𝐿𝑆 ) and 𝐿𝑁 𝑆 token-specific projections
+ NS-tokens = MLP1 (concat(g1 )), . . . , MLP𝐿𝑁 𝑆 (concat(g𝐿𝑁 𝑆 )) .         for NS-tokens (𝑖 > 𝐿𝑆 ):
+                                                                      (6)                                   𝑄                    
+                                                                                            q𝑖 , k𝑖 , v𝑖 = W𝑖 x𝑖 , W𝑖𝐾 x𝑖 , W𝑉𝑖 x𝑖 ,          (11)
+Auto-Split Tokenizer. Alternatively, all features are concatenated
+and projected once by a single MLP, then split:                             where W𝑖Ψ (Ψ ∈ {𝑄, 𝐾, 𝑉 }) follows a mixed parameterization scheme:
+                                                      
+          NS-tokens = split MLP(concat(N S)), 𝐿𝑁 𝑆 .            (7)                     WSΨ ,
+                                                                                       
+                                                                                                 𝑖 ≤ 𝐿𝑆 (shared for S-tokens),
+                                                                              W𝑖Ψ
+                                                                                       
+                                                                                    =                                                        (12)
+Auto-Split Tokenizer reduces kernel launch overhead compared                               Ψ
+                                                                                        WNS,𝑖 , 𝑖 > 𝐿𝑆 (token-specific for NS-tokens).
+                                                                                       
+with Group-wise approach, by using a single dense projection. We                       
+will evaluate both choices through experiments.                                Attention uses a standard causal mask, with NS-tokens placed
+  Ultimately, non-sequential tokenization yields 𝐿𝑁 𝑆 number of             after S-tokens. This induces: (1) S-side. Each S-token attends only
+non-sequential tokens, each of dimensionality 𝑑.                            to earlier 𝑆 positions. For timestamp-aware sequences, every event
+                                                                            conditions on its history; for timestamp-agnostic sequences (or-
+3.2.2 Sequential Tokenization. OneTrans accepts multi-behavior
+                                                                            dered by intent, e.g., purchase → add-to-cart → click/impression),
+sequences as
+                                                                          causal masking lets high-intent signals inform and filter later low-
+             S = {S1, . . . , S𝑛 }, S𝑖 = e𝑖1, . . . , e𝑖𝐿𝑖 . (8)            intent behaviors. (2) NS-side. Every NS-token attends to the entire
+Each sequence S𝑖 consists of 𝐿𝑖 number of event embeddings e,               𝑆 history, effectively a target-attention aggregation of sequence
+which is constructed by concatenating the item ID with its corre-           evidence, and to preceding NS-tokens, increasing token-level inter-
+sponding side information like item category and price.                     action diversity. (3) Pyramid support. On both S and NS sides,
+  Multi-behavior sequences can vary in their raw dimensionality.            causal masking progressively concentrates information toward later
+Hence, for each sequence S𝑖 , we use one shared projection MLP𝑖 to          positions, naturally supporting the pyramid schedule that prunes
+convert its all event e𝑖 𝑗 as a common dimensionality 𝑑:                    tokens layer by layer, to be detailed shortly.
+
+            S̃𝑖 = MLP𝑖 (e𝑖1 ), . . . , MLP𝑖 (e𝑖𝐿𝑖 ) ∈ R𝐿𝑖 ×𝑑 .
+                                                  
+                                                               (9)          3.3.2 Mixed (shared/token-specific) FFN. Similarly, the feed-forward
+                                                                            network follows the same parameterization strategy: token-specific
+Aligned sequences S̃𝑖 are merged into a single token sequence by
+                                                                            FFNs for NS-tokens, and a shared FFN for S-tokens,
+one of two rules: 1) Timestamp-aware: interleave all events by time,
+with sequence-type indicators; 2) Timestamp-agnostic: concatenate                              MixedFFN(x𝑖 ) = W𝑖2 𝜙 (W𝑖1 x𝑖 ).                      (13)
+OneTrans: Unified Feature Interaction and Sequence Modeling with One Transformer in Industrial Recommender   Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+Here W𝑖1 and W𝑖2 follow the mixed parameterization of Eqn. (12),                         Table 1: Dataset overview for OneTrans experiments.
+i.e., shared for 𝑖 ≤ 𝐿𝑆 and token-specific for 𝑖 > 𝐿𝑆 .
+    In summary, relative to a standard causal Transformer, One-                                Metric                                               Value
+Trans changes only the parameterization: NS-tokens use token-
+                                                                                               # Impressions (samples)                           29.1B
+specific QKV and FFN; S-tokens share a single set of parameters. A
+                                                                                               # Users (unique)                                 27.9M
+single causal mask ties the sequence together, allowing NS-tokens
+                                                                                               # Items (unique)                                 10.2M
+to aggregate the entire behavior history while preserving efficient,
+                                                                                               Daily impressions (mean ± std)          118.2M ± 14.3M
+Transformer-style computation.
+                                                                                               Daily active users (mean ± std)            2.3M ± 0.3M
+3.4     Pyramid Stack
+As noted in Section 3.3, causal masking concentrates information
+toward later positions. Exploiting this recency structure, we adopt                  3.5.2 Unified LLM Optimizations. We employ FlashAttention-2 [8]
+a pyramid schedule: at each OneTrans block layer, only a subset of                   to reduce attention I/O and the quadratic activation footprint of
+the most recent S-tokens issue queries, while keys/values are still                  vanilla attention via tiling and kernel fusion, yielding lower mem-
+computed over the full sequence; the query set shrinks with depth.                   ory usage and higher throughput in both training and inference.
+                𝐿 be the input token list and Q = {𝐿−𝐿 ′ +1, . . . , 𝐿}
+   Let X = {x𝑖 }𝑖=1                                                                  To further ease memory pressure, we use mixed-precision train-
+denote a tail index set with 𝐿 ′ ≤ 𝐿. Following Eqn. 12, we modify                   ing (BF16/FP16) [18] together with activation recomputation [10],
+queries as 𝑖 ∈ Q:                                                                    which discards selected forward activations and recomputes them
+                                  𝑄
+                        q𝑖 = W𝑖 x𝑖 ,          𝑖 ∈ Q,                     (14)        during backpropagation. This combination trades modest extra
+                                                                                     compute for substantial memory savings, enabling larger batches
+while keys and values are computed as usual over the full sequence                   and deeper models without architectural changes.
+{1, . . . , 𝐿}. After attention, only outputs for 𝑖 ∈ Q are retained,
+reducing the token length to 𝐿 ′ and forming a pyramidal hierarchy
+across layers.
+                                                                                     4     Experiments
+   This design yields two benefits: (i) Progressive distillation: long be-           Through both offline evaluations and online tests, we aim to an-
+havioral histories are funneled into a small tail of queries, focusing               swer the following Research Questions (RQs): RQ1: Unified stack
+capacity on the most informative events and consolidating infor-                     vs. encode–then–interaction. Does the single Transformer stack
+mation into the NS-tokens;       and (ii) Compute efficiency: attention              yield consistent performance gains under the comparable compute?
+cost becomes 𝑂 𝐿𝐿 ′𝑑 and FFN scales linearly with 𝐿 ′ . Shrinking
+                                                                                    RQ2: Which design choices matter? We conduct ablations on
+the query set directly reduces FLOPs and activation memory.                          the input layer (e.g., tokenizer, sequence fusion) and the OneTrans
+                                                                                     block (e.g., parameter sharing, attention type, pyramid stacking) to
+3.5     Training and Deployment Optimization                                         evaluate the importance of different design choices for performance
+                                                                                     and efficiency. RQ3: Systems efficiency. Do pyramid stacking,
+3.5.1 Cross Request KV Caching. In industrial RecSys, samples
+                                                                                     cross-request KV Caching, FlashAttention-2, and mixed precision
+from the same request are processed contiguously both during
+                                                                                     with recomputation reduce FLOPs/memory and latency under the
+training and serving: their S-tokens remain identical across candi-
+                                                                                     same OneTrans graph? RQ4: Scaling law. As we scale length
+dates, while NS-tokens vary per candidate item. Leveraging this
+                                                                                     (token sequence length), width (𝑑 model ), depth (number of layers),
+structure, we integrate the widely adopted KV Caching [1] into
+                                                                                     do loss/performance exhibit the expected log-linear trend? RQ5:
+OneTrans, yielding a unified two-stage paradigm.
+                                                                                     Online A/B Tests. Does deploying OneTrans online yield statisti-
+Stage I (S-side, once per request). Process all S-tokens with causal                 cally significant lifts in key business metrics (e.g., order/u, GMV/u)
+masking and cache their key/value pairs and attention outputs. This                  under production latency constraints?
+stage executes once per request.
+Stage II (NS-side, per candidate). For each candidate, compute                       4.1      Experimental Setup
+its NS-tokens and perform cross-attention against the cached S-                      4.1.1 Dataset. For offline evaluation, we evaluate OneTrans in a
+side keys/values, followed by token-specific FFN layers. Specially,                  large-scale industrial ranking scenario using production logs under
+candidate-specific sequences (e.g., SIM [20]) are pre-aggregated                     strict privacy compliance (all personally identifiable information
+into NS-tokens via pooling, as they cannot reuse the shared S-side                   is anonymized and hashed). Data are split chronologically, with
+cache.                                                                               all features snapshotted at impression time to prevent temporal
+   The KV Caching amortizes S-side computation across candidates,                    leakage and ensure online-offline consistency. Labels (e.g., clicks
+keeping per-candidate work lightweight and eliminating redundant                     and orders) are aggregated within fixed windows aligned with
+computations for substantial throughput gains.                                       production settings. Table 1 summarizes the dataset statistics.
+   Since user behavioral sequences are append-only, we extend KV
+Caching across requests: each new request reuses the previous cache                  4.1.2 Tasks and Metrics. We evaluate two binary ranking tasks
+and computes only the incremental keys/values for newly added                        as defined in Eqn. (2): CTR and CVR. Performance is measured by
+behaviors. This reduces per-request sequence computation from                        AUC and UAUC (impression-weighted user-level AUC).
+𝑂 (𝐿) to 𝑂 (Δ𝐿), where Δ𝐿 is the number of new behaviors since                          Next-batch evaluation. Data are processed chronologically.
+the last request.                                                                    For each mini-batch, we (i) log predictions in eval mode, then (ii)
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                                                              Zhang et al.
+
+
+Table 2: Offline effectiveness (CTR/CVR) and efficiency; higher AUC/UAUC is better. Efficiency figures are collected from
+prior works, and dashes indicate unavailable. * indicates models deployed in our production lineage in chronological order:
+DCNv2+DIN → RankMixer+DIN → RankMixer+Transformer → OneTransS → OneTransL (default)
+
+                                                                           CTR              CVR (order)              Efficiency
+         Type                             Model
+                                                                     AUC ↑      UAUC ↑    AUC ↑     UAUC ↑     Params (M)     TFLOPs
+         (1) Base model                   DCNv2 + DIN (base)*        0.79623    0.71927   0.90361   0.71955              10       0.06
+                                          Wukong + DIN               +0.08%     +0.11%    +0.14%    +0.11%              28        0.54
+         (2) Feature-interaction          HiFormer + DIN             +0.11%     +0.18%    +0.23%    -0.20%             108        1.35
+                                          RankMixer + DIN*           +0.27%     +0.36%    +0.43%    +0.19%             107        1.31
+                                          RankMixer + StackDIN       +0.40%     +0.37%    +0.63%    -1.28%             108        1.43
+         (3) Sequence-modeling            RankMixer + LONGER         +0.49%     +0.59%    +0.47%    +0.44%             109        1.87
+                                          RankMixer + Transformer*   +0.57%     +0.90%    +0.52%    +0.75%             109        2.51
+                                          OneTransS *                +1.13%     +1.77%    +0.90%    +1.66%              91        2.64
+         (4) Unified framework
+                                          OneTransL (default)*       +1.53%     +2.79%    +1.14%    +3.23%             330        8.62
+
+
+train on the same batch. AUC and UAUC are computed daily from             module (StackDIN → Transformer → LONGER) yields consistent
+each day’s predictions and finally macro-averaged across days.            gains in CTR AUC/UAUC and CVR AUC. In our system, improve-
+   Efficiency metrics. We report Params (model parameters ex-             ments above +0.1% in these metrics are considered meaningful,
+cluding sparse embeddings) and TFLOPs (training compute in TFLOPs         while gains above +0.3% typically correspond to statistically sig-
+at batch size 2048).                                                      nificant effects in online A/B tests. However, CVR UAUC is treated
+                                                                          cautiously due to smaller per-user sample sizes and higher volatility.
+4.1.3 Baselines. We construct industry-standard model combi-                 Moving to a unified design, OneTransS surpasses the baseline
+nations as baselines using the same features and matched com-             by +1.13%/+1.77% (CTR AUC/UAUC) and +0.90%/+1.66% (CVR
+pute budgets. Under the encode-then-interaction paradigm, we start        AUC/UAUC). At a comparable parameter scale, it also outperforms
+from the widely-used production baseline DCNv2+DIN [25, 31]               RankMixer+Transformer with similar training FLOPs (2.64T vs.
+and progressively strengthen the feature-interaction module:              2.51T), demonstrating the benefits of unified modeling. Scaling fur-
+DCNv2 → Wukong [28] → HiFormer [11] → RankMixer [33]. With                ther, OneTransL delivers the best overall improvement of +1.53%
+RankMixer fixed, we then vary the sequence-modeling module:               /+2.79% (CTR AUC/UAUC) and +1.14%/+3.23% (CVR AUC/UAUC),
+StackDIN → Transformer [4] → LONGER [1].                                  showing a predictable quality performance as model capacity grows.
+                                                                             In summary, unifying sequence modeling and feature interaction
+4.1.4 Hyperparameter Settings. We report two settings: OneTrans-
+                                                                          in a single Transformer yields more reliable and compute-efficient
+S uses 6 stacked OneTrans blocks width 𝑑=256, and 𝐻 =4 heads,
+                                                                          improvements than scaling either component independently.
+targeting ≈ 100M parameters. OneTrans-L scales to 8 layers with
+width 𝑑=384 (still 𝐻 =4). Inputs are processed through a unified to-
+kenizer: multi-behavior sequences are fused in a timestamp-aware          4.3     RQ2: Design Choices via Ablation Study
+manner, while non-sequential features are tokenized via Auto-Split.
+                                                                          We perform an ablation study of the proposed OneTransS model
+The pyramid schedule linearly reduces tokens from 1190 to 12.
+                                                                          to quantify the contribution of key design choices. The complete
+   Optimization and infrastructure. We use a dual-optimizer
+                                                                          results are summarized in Table 3. We evaluate the following vari-
+strategy without weight decay: sparse embeddings are optimized
+                                                                          ants: Input variants: i) Replacing the Auto-Split Tokenizer with a
+with Adagrad (𝛽 1 =0.1, 𝛽 2 =1.0), and dense parameters with RM-
+                                                                          Group-wise Tokenizer (Row 1); ii) Using a timestamp-agnostic fusion
+SPropV2 (lr=0.005, momentum=0.99999). The per-GPU batch size
+                                                                          strategy instead of the timestamp-aware sequence fusion (Row 2);
+is set to 2048 during training, with gradient clipping thresholds
+                                                                          iii) Removing [SEP] tokens in the timestamp-aware sequence fu-
+of 90 for dense layers and 120 for sparse layers to ensure stable
+                                                                          sion (Row 3); OneTrans block variants: i) Sharing a single set of
+optimization. For online inference, we adopt a smaller batch size
+                                                                          Q/K/V and FFN parameters across all tokens, instead of assigning
+of 100 per GPU to balance throughput and latency. Training uses
+                                                                          separate parameters to NS-tokens (Row 4); ii) Replacing causal at-
+data-parallel all-reduce on 16 H100 GPUs.
+                                                                          tention with full attention (Row 5); iii) Disabling the pyramid stack
+                                                                          by keeping the full token sequence at all layers (Row 6).
+4.2     RQ1: Performance Evaluation                                           In summary, the ablations show that 1) Auto-Split Tokenizer
+We anchor our comparison on DCNv2+DIN, the pre-scaling pro-               provides a clear advantage over manually grouping non-sequential
+duction baseline in our scenario (Table 2). Under the encode-then-        features into tokens, indicating that allowing the model to automat-
+interaction paradigm, scaling either component independently is           ically build non-sequential tokens is more effective than relying on
+beneficial: upgrading the feature interaction module (DCNv2 →             human-defined feature grouping; 2) Timestamp-aware fusion
+Wukong → HiFormer → RankMixer) or the sequence modeling                   beats intent-based ordering when timestamps exist, suggesting that
+OneTrans: Unified Feature Interaction and Sequence Modeling with One Transformer in Industrial Recommender   Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+   Table 3: Impact of the choices of input design and OneTrans block design, using the OneTransS model as the reference.
+
+                                                                                            CTR                 CVR (order)                 Efficiency
+      Type                   Variant
+                                                                                     AUC ↑      UAUC ↑       AUC ↑      UAUC ↑      Params (M)       TFLOPs
+                             Group-wise Tokenzier                                    -0.10%      -0.30%      -0.12%      -0.10%                78         2.35
+      Input                  Timestamp-agnostic Fusion                               -0.09%      -0.22%      -0.20%      -0.21%                91         2.64
+                             Timestamp-agnostic Fusion w/o Sep Tokens                -0.13%      -0.32%      -0.29%      -0.33%                91         2.62
+                             Shared parameters                                       -0.15%      -0.29%      -0.14%     -0.29%                 24         2.64
+      OneTrans Block         Full attention                                          +0.00%      +0.01%      -0.03%     +0.06%                 91         2.64
+                             w/o pyramid stack                                       -0.05%      +0.06%      -0.04%     -0.42%                 92         8.08
+
+
+Table 4: Key efficiency comparison between OneTransL and                             training and serving; 3) FlashAttention primarily benefits train-
+the DCNv2+DIN baseline.                                                              ing, reducing runtime by ∼50% and activation memory by ∼58%.
+                                                                                     Inference gains are modest (∼11–12% for latency and memory), as
+    Metric                              DCNv2+DIN          OneTransL                 attention dominates training costs with larger batches and back-
+                                                                                     propagation; 4) Mixed precision with recomputation delivers
+    TFLOPs                                    0.06              8.62
+                                                                                     the largest serving gains: p99 latency improves by ∼69% and infer-
+    Params (M)                                 10               330
+                                                                                     ence memory by ∼30%, as inference can operate end-to-end in low
+    MFU                                       13.4              30.8
+                                                                                     precision. By contrast, training must retain full-precision optimizer
+    Inference Latency (p99, ms)               13.6              13.2
+                                                                                     states and gradient accumulators; even so, training runtime and
+    Training Memory (GB)                       20                32
+                                                                                     memory improve by ∼32% and ∼49%.
+    Inference Memory (GB)                      1.8              0.8
+                                                                                        These results demonstrate the effectiveness of LLM optimiza-
+                                                                                     tions for large-scale recommendation. Building on the ablations
+                                                                                     conducted on OneTransS , we scale up to OneTransL and show that
+temporal ordering should be prioritized over event impact; 3) Un-                    with these techniques, OneTransL maintains online efficiency com-
+der timestamp-agnostic fusion, learnable [SEP] tokens help the                       parable to the much smaller DCNv2+DIN baseline (Table 4). This
+model separate sequences; 4) Assigning token-specific parame-                        demonstrates again that reformulating RecSys into a unified Trans-
+ters to NS-tokens yields clear gains over sharing one set across all                 former backbone enables seamless adoption of LLM optimizations,
+tokens, demonstrating that modeling non-sequential features with                     unlocking effective scaling previously unattainable in traditional
+individualized projections enables better feature discrimination; 5)                 encode-then-interaction architectures.
+Causal and full attention achieve similar results, indicating that
+allowing tokens to attend to future positions is not crucial in this
+setting. Notably, we emphasize that full attention prohibits the use                 4.5      RQ4: Scaling-Law Validation
+of standard optimizations such as KV caching; 6) Retaining the full
+                                                                                     We probe scaling laws for OneTrans along three axes: (1) length -
+token list at every layer provides no benefit: OneTrans effectively
+                                                                                     input token sequence length, (2) depth - number of stacked blocks,
+summarizes information into a small tail of tokens, so the pyramid
+                                                                                     and (3) width - hidden-state dimensionality.
+design can safely prune queries to save computation.
+                                                                                         As shown in Fig. 3(a), increasing length yields the largest gains
+                                                                                     by introducing more behavioral evidence. Between depth and width,
+4.4     RQ3: Systems Efficiency                                                      we observe a clear trade-off: increasing depth generally delivers
+To quantify the optimizations in Section 3.5, we ablate them on                      larger performance improvements than simply widening width, as
+an unoptimized OneTransS baseline and report training/inference                      deeper stacks extract higher-order interactions and richer abstrac-
+metrics in Table 5. The unoptimized OneTransS runs at 407 ms train-                  tions. However, deeper models also increase serial computation,
+ing runtime with 53.13 GB peak training memory, and 54.00 ms p99                     whereas widening is more amenable to parallelism. Thus, choos-
+inference latency with 1.70 GB inference memory, where p99 de-                       ing between depth and width should balance performance benefits
+notes the 99th-percentile (tail) latency—a standard SLO metric for                   against system efficiency under the target hardware budget.
+high-availability online services. These differences reflect distinct                    We further analyze scaling-law behavior by jointly widening
+operating conditions: offline training uses large per-device batches,                and deepening OneTrans, and — for comparison — by scaling
+while online inference distributes micro-batches across machines                     the RankMixer+Transformer baseline on the RankMixer side
+for stability. As shown in the table, 1) Pyramid stack yields sub-                   till 1B; we then plot ΔUAUC versus training FLOPs on a log scale.
+stantial savings (−28.7% training time, −42.6% training memory,                      As shown in Fig. 3(b), OneTrans and RankMixer both exhibit
+−8.4% inference latency, −6.9% inference memory) by compressing                      clear log-linear trends, but OneTrans shows a steeper slope, likely
+long behavioral histories into compact query sets; 2) Cross-request                  because RankMixer-centric scaling lacks a unified backbone and
+KV caching eliminates redundant sequence-side computation, re-                       its MoE-based expansion predominantly widens the FFN hidden
+ducing runtime/latency by ∼30% and memory by ∼50% in both                            dimension. Together, these results suggest that OneTrans is more
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY                                                                                                       Zhang et al.
+
+
+                               Table 5: Impact of variants against the unoptimized OneTransS . Memory is peak GPU usage.
+
+                                                                                            Training                             Inference
+                           Variant
+                                                                                    Runtime (ms)   Memory (GB)      Latency (p99; ms)      Memory (GB)
+                           Unoptimized OneTransS                                            407            53.13                  54.00           1.70
+                           + Pyramid stack                                               −28.7%           −42.6%                 −8.4%           −6.9%
+                           + Cross-Request KV Caching                                    −30.2%           −58.4%                −29.6%          −52.9%
+                           + FlashAttention                                              −50.1%           −58.9%                −12.3%          −11.6%
+                           + Mixed Precision with Recomputation                          −32.9%           −49.0%                −69.1%          −30.0%
+
+
+                        0.65                                    Length (#Tokens)                   Table 6: Online A/B results: OneTransL (treatment) vs.
+                                       T=2048                   Depth (#Layers)                    RankMixer+Transformer (control). Order/u and GMV/u are
+                                                                Width (#Dim)
+                        0.60                      L=10                                             relative deltas (%). Latency is the relative end-to-end per-
+         CTR UAUC (%)
+
+
+
+
+                                                                                                   impression change Δ% (lower is better). * denotes 𝑝 < 0.05,
+                        0.55                L=8
+                                T=1024                                                             and ** for 𝑝 < 0.01
+                        0.50                                             D=512
+                                                      D=384                                            Scenario     order/u        gmv/u      Latency ( Δ%; 𝑝99 ) ↓
+                        0.45        L=6                                                                Feeds       +4.3510%*     +5.6848%*           −3.91%
+                               T=768 D=256
+                                                                                                       Mall        +2.5772%**    +3.6696%*           −3.26%
+                        0.40
+                                   2              4       6         8          10
+                                                   TFLOPs (T)
+                               (a) Trade-off: FLOPs vs. ΔUAUC                                         We report user-level order/u and gmv/u as relative deltas (Δ%)
+                                                                                                   versus the RankMixer+Transformer control with two-sided 95%
+                        1.60      OneTrans
+                                  RankMixer                                                        CIs (user-level stratified bootstrap), and end-to-end latency—
+                                                                                                   measured as the relative change in p99 per-impression time from
+                        1.20                                                                       request arrival to response emission (Δ%; lower is better). As shown
+         CTR UAUC (%)
+
+
+
+
+                                                                                                   in Table 6, OneTransL delivers consistent gains: in Feeds, +4.3510%
+                        0.80                                                                       order/u, +5.6848% gmv/u, and −3.91% latency; in Mall, +2.5772%
+                                                                                                   order/u, +3.6696% gmv/u, and −3.26% latency — indicating the
+                        0.40                                                                       unified modeling framework lifts business metrics while reducing
+                                                                                                   serving time relative to a strong non-unified baseline.
+                        0.00                                                                          We further observe a +0.7478% increase in user Active Days and
+                                                                                                   a significant improvement of +13.59% in cold-start product order/u,
+                                       21             22            23
+                                              TFLOPs (T, log scale)                                highlighting the strong generalization capability of the proposed
+                                                                                                   model.
+                          (b) Scaling law: ΔUAUC vs. FLOPs (log)
+                                                                                                   5   Conclusion
+      Figure 3: Comparison of trade-off and scaling law.
+                                                                                                   We present OneTrans, a unified Transformer backbone for person-
+                                                                                                   alized ranking to replace the conventional encode–then–interaction.
+                                                                                                   A unified tokenizer converts both sequential and non-sequential at-
+parameter- and compute-efficient, offering favorable performance–                                  tributes into one token sequence, and a unified Transformer block
+compute trade-offs for industrial deployment.                                                      jointly performs sequence modeling and feature interaction via
+                                                                                                   shared parameters for homogeneous (sequential) tokens and token-
+4.6     RQ5: Online A/B Tests                                                                      specific parameters for heterogeneous (non-sequential) tokens. To
+We assess the business impact of OneTrans in two large-scale                                       make the unified stack efficient at scale, we adopt a pyramid sched-
+industrial scenarios: (i) Feeds (home feeds), and (ii) Mall (the overall                           ule that progressively prunes sequential tokens and a cross-request
+setting that includes Feeds and other sub-scenarios). Traffic is split                             KV Caching that reuses user-side computation; the design further
+at the user/account level with hashing and user-level randomization.                               benefits from LLM-style systems optimizations (e.g., FlashAtten-
+Both the control and treatment models are trained and deployed with                                tion, mixed precision). Across large-scale evaluations, OneTrans
+the past 1.5 years of production data to ensure a fair comparison.                                 exhibits near log-linear performance gains as width/depth increase,
+    Our prior production baseline, RankMixer+Transformer, serves                                   and delivers statistically significant business lifts while maintain-
+as the control (≈ 100M neural-network parameters) and does not                                     ing production-grade latency. We believe this unified design offers
+use sequence KV caching. The treatment deploys OneTransL with                                      a practical way to scale recommender systems while reusing the
+the serving optimizations described in Section 3.5.                                                system optimizations that have powered recent LLM advances.
+OneTrans: Unified Feature Interaction and Sequence Modeling with One Transformer in Industrial Recommender       Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+
+
+References                                                                               [22] Weiping Song, Chence Shi, Zhiping Xiao, Zhijian Duan, Yewen Xu, Ming Zhang,
+ [1] Zheng Chai, Qin Ren, Xijun Xiao, Huizhi Yang, Bo Han, Sijun Zhang, Di Chen,              and Jian Tang. 2019. AutoInt: Automatic Feature Interaction Learning via Self-
+     Hui Lu, Wenlin Zhao, Lele Yu, et al. 2025. LONGER: Scaling Up Long Sequence              Attentive Neural Networks. In Proceedings of the 28th ACM International Confer-
+     Modeling in Industrial Recommenders. arXiv preprint arXiv:2505.04421 (2025).             ence on Information and Knowledge Management (CIKM ’19). ACM, 1161–1170.
+ [2] Jianxin Chang, Chenbin Zhang, Yiqun Hui, Dewei Leng, Yanan Niu, Yang Song,               doi:10.1145/3357384.3357925
+     and Kun Gai. 2023. Pepnet: Parameter and embedding personalized network for         [23] Fei Sun, Jun Liu, Jian Wu, Changhua Pei, Xiao Lin, Wenwu Ou, and Peng Jiang.
+     infusing with personalized prior information. In Proceedings of the 29th ACM             2019. BERT4Rec: Sequential Recommendation with Bidirectional Encoder Rep-
+     SIGKDD Conference on Knowledge Discovery and Data Mining. 3795–3804.                     resentations from Transformer. arXiv:1904.06690 [cs.IR] https://arxiv.org/abs/
+ [3] Yin-Wen Chang, Cho-Jui Hsieh, Kai-Wei Chang, Chih-Jen Lin, et al. 2010. Training         1904.06690
+     and testing low-degree polynomial data mappings via linear svm. Journal of          [24] Ruoxi Wang, Bin Fu, Gang Fu, and Mingliang Wang. 2017. Deep & Cross Network
+     Machine Learning Research 11, 4 (2010).                                                  for Ad Click Predictions. arXiv:1708.05123 [cs.LG] https://arxiv.org/abs/1708.
+ [4] Qiwei Chen, Huan Zhao, Wei Li, Pipei Huang, and Wenwu Ou. 2019. Be-                      05123
+     havior Sequence Transformer for E-commerce Recommendation in Alibaba.               [25] Ruoxi Wang, Rakesh Shivanna, Derek Cheng, Sagar Jain, Dong Lin, Lichan Hong,
+     arXiv:1905.06874 [cs.IR] https://arxiv.org/abs/1905.06874                                and Ed Chi. 2021. DCN V2: Improved Deep & Cross Network and Practical
+ [5] Heng-Tze Cheng, Levent Koc, Jeremiah Harmsen, Tal Shaked, Tushar Chandra,                Lessons for Web-scale Learning to Rank Systems. In Proceedings of the Web
+     Hrishi Aradhye, Glen Anderson, Greg Corrado, Wei Chai, Mustafa Ispir, Rohan              Conference 2021 (WWW ’21). ACM, 1785–1797. doi:10.1145/3442381.3450078
+     Anil, Zakaria Haque, Lichan Hong, Vihan Jain, Xiaobing Liu, and Hemal Shah.         [26] Xue Xia, Pong Eksombatchai, Nikil Pancha, Dhruvil Deven Badani, Po-Wei Wang,
+     2016. Wide & Deep Learning for Recommender Systems. arXiv:1606.07792 [cs.LG]             Neng Gu, Saurabh Vishwas Joshi, Nazanin Farahpour, Zhiyuan Zhang, and An-
+     https://arxiv.org/abs/1606.07792                                                         drew Zhai. 2023. Transact: Transformer-based realtime user action model for
+ [6] Paul Covington, Jay Adams, and Emre Sargin. 2016. Deep neural networks                   recommendation at pinterest. In Proceedings of the 29th ACM SIGKDD Conference
+     for youtube recommendations. In Proceedings of the 10th ACM conference on                on Knowledge Discovery and Data Mining. 5249–5259.
+     recommender systems. 191–198.                                                       [27] Zhichen Zeng, Xiaolong Liu, Mengyue Hang, Xiaoyi Liu, Qinghai Zhou, Chaofei
+ [7] Tri Dao, Dan Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. 2022. Flashat-           Yang, Yiqun Liu, Yichen Ruan, Laming Chen, Yuxin Chen, et al. 2024. Interformer:
+     tention: Fast and memory-efficient exact attention with io-awareness. Advances           Towards effective heterogeneous interaction learning for click-through rate
+     in neural information processing systems 35 (2022), 16344–16359.                         prediction. arXiv preprint arXiv:2411.09852 (2024).
+ [8] Tri Dao, Aleksander Thomas, Anima Anandkumar, Matei Zaharia, and Christo-           [28] Buyun Zhang, Liang Luo, Yuxin Chen, Jade Nie, Xi Liu, Daifeng Guo, Yanli Zhao,
+     pher Re. 2023. FlashAttention-2: Faster Attention with Better Parallelism and            Shen Li, Yuchen Hao, Yantao Yao, et al. 2024. Wukong: Towards a scaling law for
+     Work Partitioning. arXiv preprint arXiv:2307.08691 (2023).                               large-scale recommendation. arXiv preprint arXiv:2403.02545 (2024).
+ [9] Yufei Feng, Fuyu Lv, Weichen Shen, Menghan Wang, Fei Sun, Yu Zhu, and Keping        [29] Biao Zhang and Rico Sennrich. 2019. Root mean square layer normalization.
+     Yang. 2019. Deep Session Interest Network for Click-Through Rate Prediction.             Advances in neural information processing systems 32 (2019).
+     arXiv:1905.06482 [cs.IR] https://arxiv.org/abs/1905.06482                           [30] Guorui Zhou, Na Mou, Ying Fan, Qi Pi, Weijie Bian, Chang Zhou, Xiaoqiang Zhu,
+[10] Audrunas Gruslys, Remi Munos, Ivo Daniel, Oriol Vinyals, and Koray                       and Kun Gai. 2018. Deep Interest Evolution Network for Click-Through Rate
+     Kavukcuoglu. 2016. Memory-Efficient Backpropagation through Time. In Ad-                 Prediction. arXiv:1809.03672 [stat.ML] https://arxiv.org/abs/1809.03672
+     vances in Neural Information Processing Systems (NeurIPS).                          [31] Guorui Zhou, Chengru Song, Xiaoqiang Zhu, Ying Fan, Han Zhu, Xiao Ma,
+[11] Huan Gui, Ruoxi Wang, Ke Yin, Long Jin, Maciej Kula, Taibai Xu, Lichan Hong,             Yanghui Yan, Junqi Jin, Han Li, and Kun Gai. 2018. Deep Interest Network for
+     and Ed H. Chi. 2023. Hiformer: Heterogeneous Feature Interactions Learning               Click-Through Rate Prediction. arXiv:1706.06978 [stat.ML] https://arxiv.org/abs/
+     with Transformers for Recommender Systems. arXiv:2311.05884 [cs.IR] https:               1706.06978
+     //arxiv.org/abs/2311.05884                                                          [32] Han Zhu, Xiang Li, Pengye Zhang, Guozheng Li, Jie He, Han Li, and Kun Gai.
+[12] Huifeng Guo, Ruiming Tang, Yunming Ye, Zhenguo Li, Xiuqiang He, and Zhenhua              2018. Learning tree-based deep model for recommender systems. In Proceedings
+     Dong. 2018. DeepFM: An End-to-End Wide & Deep Learning Framework for                     of the 24th ACM SIGKDD international conference on knowledge discovery & data
+     CTR Prediction. arXiv:1804.04950 [cs.IR] https://arxiv.org/abs/1804.04950                mining. 1079–1088.
+[13] Junjie Huang, Jizheng Chen, Jianghao Lin, Jiarui Qin, Ziming Feng, Weinan           [33] Jie Zhu, Zhifang Fan, Xiaoxie Zhu, Yuchen Jiang, Hangyu Wang, Xintian Han,
+     Zhang, and Yong Yu. 2024. A comprehensive survey on retrieval methods in                 Haoran Ding, Xinmin Wang, Wenlin Zhao, Zhen Gong, Huizhi Yang, Zheng Chai,
+     recommender systems. arXiv preprint arXiv:2407.21022 (2024).                             Zhe Chen, Yuchao Zheng, Qiwei Chen, Feng Zhang, Xun Zhou, Peng Xu, Xiao
+[14] Wang-Cheng Kang and Julian McAuley. 2018. Self-Attentive Sequential Recom-               Yang, Di Wu, and Zuotao Liu. 2025. RankMixer: Scaling Up Ranking Models in
+     mendation. arXiv:1808.09781 [cs.IR] https://arxiv.org/abs/1808.09781                     Industrial Recommenders. arXiv:2507.15551 [cs.IR] https://arxiv.org/abs/2507.
+[15] Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B Brown, Benjamin Chess,                 15551
+     Rewon Child, Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. 2020.
+     Scaling laws for neural language models. arXiv preprint arXiv:2001.08361 (2020).
+[16] Shichen Liu, Fei Xiao, Wenwu Ou, and Luo Si. 2017. Cascade ranking for opera-
+     tional e-commerce search. In Proceedings of the 23rd ACM SIGKDD International
+     Conference on Knowledge Discovery and Data Mining. 1557–1565.
+[17] Paulius Micikevicius, Sharan Narang, Jonah Alben, Gregory Diamos, Erich
+     Elsen, David Garcia, Boris Ginsburg, Michael Houston, Oleksii Kuchaiev, Ganesh
+     Venkatesh, et al. 2017. Mixed precision training. arXiv preprint arXiv:1710.03740
+     (2017).
+[18] Paulius Micikevicius, Sharan Narang, Jonah Alben, Greg Diamos, Erich Elsen,
+     David Garcia, Boris Ginsburg, Michael Houston, Oleksii Kuchaiev, Ganesh
+     Venkatesh, and Hao Wu. 2018. Mixed Precision Training. In International Confer-
+     ence on Learning Representations (ICLR).
+[19] Nikil Pancha, Andrew Zhai, Jure Leskovec, and Charles Rosenberg. 2022. Pinner-
+     former: Sequence modeling for user representation at pinterest. In Proceedings
+     of the 28th ACM SIGKDD conference on knowledge discovery and data mining.
+     3702–3712.
+[20] Qi Pi, Guorui Zhou, Yujing Zhang, Zhe Wang, Lejian Ren, Ying Fan, Xiaoqiang
+     Zhu, and Kun Gai. 2020. Search-based user interest modeling with lifelong
+     sequential behavior data for click-through rate prediction. In Proceedings of the
+     29th ACM International Conference on Information & Knowledge Management.
+     2685–2692.
+[21] Jiarui Qin, Jiachen Zhu, Bo Chen, Zhirong Liu, Weiwen Liu, Ruiming Tang, Rui
+     Zhang, Yong Yu, and Weinan Zhang. 2022. Rankflow: Joint optimization of multi-
+     stage cascade ranking systems as flows. In Proceedings of the 45th International
+     ACM SIGIR Conference on Research and Development in Information Retrieval.
+     814–824.
+
