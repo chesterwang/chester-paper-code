@@ -38,7 +38,7 @@ class PositionalEncoding(nn.Module):
 
 class MixedCausalAttention(nn.Module):
     """Mixed Causal Attention with shared parameters for sequential tokens and token-specific for non-sequential"""
-    def __init__(self, d_model: int, num_heads: int, seq_len: int, ns_token_count: int):
+    def __init__(self, d_model: int, num_heads: int, seq_token_count: int, ns_token_count: int):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
@@ -57,10 +57,10 @@ class MixedCausalAttention(nn.Module):
         self.out_proj = nn.Linear(d_model, d_model)
         
         # Positional encoding
-        self.pos_encoding = PositionalEncoding(d_model, seq_len)
+        self.pos_encoding = PositionalEncoding(d_model, seq_token_count+ns_token_count)
         
         # Causal mask
-        self.register_buffer('mask', self._create_causal_mask(seq_len))
+        self.register_buffer('mask', self._create_causal_mask(seq_token_count+ns_token_count))
         
     def _create_causal_mask(self, seq_len: int):
         """Create causal mask for attention"""
@@ -182,7 +182,7 @@ class OneTransBlock(nn.Module):
         self.ns_token_count = ns_token_count
         
         # Mixed causal attention
-        self.mha = MixedCausalAttention(d_model, num_heads, seq_token_count + ns_token_count, ns_token_count)
+        self.mha = MixedCausalAttention(d_model, num_heads, seq_token_count , ns_token_count)
         
         # Mixed feed forward
         self.ffn = MixedFeedForward(d_model, d_ff, seq_token_count, ns_token_count)
@@ -216,19 +216,21 @@ class OneTrans(nn.Module):
                  d_ff: int,
                  num_layers: int,
                  seq_token_count: int,
-                 ns_token_count: int):
+                 ns_token_count: int,
+                 seq_pyramid_schedule: Optional[list[int]] = None):
         super().__init__()
         self.d_model = d_model
         self.seq_token_count = seq_token_count
         self.ns_token_count = ns_token_count
+        self.seq_pyramid_schedule = seq_pyramid_schedule or [seq_token_count // (2 ** i) for i in range(num_layers)]
         
         # Token embedding
         self.token_embedding = nn.Embedding(vocab_size, d_model)
         
         # OneTrans blocks
         self.blocks = nn.ModuleList([
-            OneTransBlock(d_model, num_heads, d_ff, seq_token_count, ns_token_count)
-            for _ in range(num_layers)
+            OneTransBlock(d_model, num_heads, d_ff, seq_pyramid_schedule[layer_idx], ns_token_count)
+            for layer_idx in range(num_layers)
         ])
         
         # Final layer norm
@@ -256,7 +258,8 @@ class OneTrans(nn.Module):
         x = torch.cat([seq_emb, ns_emb], dim=1)
         
         # Pass through OneTrans blocks
-        for block in self.blocks:
+        for layer_idx, block in enumerate(self.blocks):
+            x = x[:, -(self.seq_pyramid_schedule[layer_idx] + self.ns_token_count):, :]
             x = block(x)
         
         # Apply final normalization
@@ -283,6 +286,9 @@ def demo_onetrans():
     ns_token_count = 20    # Number of non-sequential tokens
     batch_size = 8
     
+    # Define pyramid schedule（schedule only for behavior sequence feature， not for non sequence feature）
+    seq_pyramid_schedule = [seq_token_count // (2 ** i) for i in range(num_layers)] + [0]
+    
     # Create model
     model = OneTrans(
         vocab_size=vocab_size,
@@ -291,7 +297,8 @@ def demo_onetrans():
         d_ff=d_ff,
         num_layers=num_layers,
         seq_token_count=seq_token_count,
-        ns_token_count=ns_token_count
+        ns_token_count=ns_token_count,
+        seq_pyramid_schedule=seq_pyramid_schedule
     )
     
     # Create dummy input data (representing token IDs)
@@ -301,6 +308,7 @@ def demo_onetrans():
     print(f"Input shapes:")
     print(f"  Sequential tokens: {seq_tokens.shape}")
     print(f"  Non-sequential tokens: {ns_tokens.shape}")
+    print(f"Pyramid schedule: {seq_pyramid_schedule}")
     
     # Forward pass
     with torch.no_grad():
@@ -319,6 +327,7 @@ def demo_onetrans():
     print(f"  - Model dimensions: {d_model}")
     print(f"  - Number of layers: {num_layers}")
     print(f"  - Attention heads: {num_heads}")
+    print(f"  - Pyramid schedule: {seq_pyramid_schedule}")
     
     return model, output
 
