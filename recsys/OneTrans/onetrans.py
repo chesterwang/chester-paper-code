@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple, Optional
 import math
+import torchview
 
 class RMSNorm(nn.Module):
     """Root Mean Square Layer Normalization"""
@@ -192,17 +193,17 @@ class OneTransBlock(nn.Module):
         self.norm2 = RMSNorm(d_model)
         
         # Dropout
-        self.dropout = nn.Dropout(0.1)
+        # self.dropout = nn.Dropout(0.1)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # First residual connection with attention
         attn_out = self.mha(self.norm1(x), self.seq_token_count)
-        attn_out = self.dropout(attn_out)
+        # attn_out = self.dropout(attn_out)
         x = x + attn_out
         
         # Second residual connection with feed forward
         ffn_out = self.ffn(self.norm2(x), self.seq_token_count)
-        ffn_out = self.dropout(ffn_out)
+        # ffn_out = self.dropout(ffn_out)
         x = x + ffn_out
         
         return x
@@ -331,5 +332,29 @@ def demo_onetrans():
     
     return model, output
 
+def visualize_model(model):
+    """Visualize the model using torchview if available"""
+    try:
+        # Create a simple input to visualize the model
+        # This assumes the model expects sequential and non-sequential tokens
+        vocab_size = model.token_embedding.num_embeddings
+        seq_token_count = model.seq_token_count
+        ns_token_count = model.ns_token_count
+        batch_size = 1
+        
+        seq_tokens = torch.randint(0, vocab_size, (batch_size, seq_token_count))
+        ns_tokens = torch.randint(0, vocab_size, (batch_size, ns_token_count))
+        
+        # Visualize the model
+        graph = torchview.draw_graph(model, (seq_tokens, ns_tokens), expand_nested=True, depth=2)
+        graph.visual_graph.render("onetrans", format="png")
+    except Exception as e:
+        print(f"Error during visualization: {e}")
+        return None
+
 if __name__ == "__main__":
     model, output = demo_onetrans()
+    
+    # Try to visualize the model
+    print("\n=== Model Visualization ===")
+    graph = visualize_model(model)
