@@ -219,34 +219,12 @@ class OneRecDecoder(nn.Module):
     OneRec decoder for generating semantic IDs
     """
     def __init__(self,
-                #  vocab_size: int = None,  # Size of codebook
-                #  num_rq_layers: int = None,  # Number of RQ layers
-                #  model_dim: int = None,
-                #  num_decoder_layers: int = None,
-                #  num_heads: int = None,
-                #  ff_dim: int = None,
-                #  num_experts: int = None,
-                #  top_k: int = None
                  ):
         super().__init__()
 
         # Get config values
         config = OneRecConfig.get_instance()
         
-        # Use provided values or config defaults
-        # vocab_size = vocab_size or config.codebook_size
-        # num_rq_layers = num_rq_layers or config.num_rq_layers
-        # model_dim = model_dim or config.decoder_model_dim
-        # num_decoder_layers = num_decoder_layers or config.num_decoder_layers
-        # num_heads = num_heads or config.decoder_num_heads
-        # ff_dim = ff_dim or config.decoder_ff_dim
-        # num_experts = num_experts or config.num_experts
-        # top_k = top_k or config.top_k
-
-        # self.vocab_size = vocab_size
-        # self.num_rq_layers = num_rq_layers
-        # self.model_dim = model_dim
-
         # Embedding for semantic IDs (for each RQ layer)
         self.semantic_id_embeddings = nn.ModuleList([
             nn.Embedding(config.codebook_size, config.decoder_model_dim) for _ in range(config.num_rq_layers)

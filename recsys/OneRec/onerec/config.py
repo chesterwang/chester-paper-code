@@ -68,12 +68,11 @@ class OneRecConfig:
             self.top_k = 2
             self.user_dim = 512
             self.item_dim = 512
-            self.num_objectives = 5
             self.num_industrial_objectives = 3
 
             ##PreferenceScoreTower
             # self.hidden_dim: int = 1024,
-            self.num_objectives: int = 5,  # ctr, lvtr, ltr, vtr, etc.
+            self.num_objectives: int = 5  # ctr, lvtr, ltr, vtr, etc.
             self.tower_hidden_dim: int = 512 
 
             self._initialized = True

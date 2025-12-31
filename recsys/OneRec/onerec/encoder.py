@@ -399,17 +399,20 @@ if __name__ == "__main__":
     seq_len_pos = 256
     seq_len_life = 2000  # Before compression
     
+    # Get config values
+    config = OneRecConfig.get_instance()
+
     # User static features
     user_features = {
-        'uid': torch.randint(0, 1000000, (batch_size,)),
+        'uid': torch.randint(0, config.uid_vocab_size, (batch_size,)),
         'gender': torch.randint(0, 3, (batch_size,)),
         'age': torch.randint(18, 80, (batch_size,))
     }
     
     # Short-term features
     short_term_features = {
-        'vid': torch.randint(0, 10000000, (batch_size, seq_len_short)),
-        'aid': torch.randint(0, 5000000, (batch_size, seq_len_short)),
+        'vid': torch.randint(0, config.vid_vocab_size, (batch_size, seq_len_short)),
+        'aid': torch.randint(0, config.aid_vocab_size, (batch_size, seq_len_short)),
         'tag': torch.randn(batch_size, seq_len_short, 100),
         'ts': torch.randn(batch_size, seq_len_short),
         'playtime': torch.randn(batch_size, seq_len_short),
@@ -419,8 +422,8 @@ if __name__ == "__main__":
     
     # Positive feedback features
     pos_feedback_features = {
-        'vid': torch.randint(0, 10000000, (batch_size, seq_len_pos)),
-        'aid': torch.randint(0, 5000000, (batch_size, seq_len_pos)),
+        'vid': torch.randint(0, config.vid_vocab_size, (batch_size, seq_len_pos)),
+        'aid': torch.randint(0, config.aid_vocab_size, (batch_size, seq_len_pos)),
         'tag': torch.randn(batch_size, seq_len_pos, 100),
         'ts': torch.randn(batch_size, seq_len_pos),
         'playtime': torch.randn(batch_size, seq_len_pos),
@@ -430,8 +433,8 @@ if __name__ == "__main__":
     
     # Lifelong features (compressed to 2000 before QFormer)
     lifelong_features = {
-        'vid': torch.randint(0, 10000000, (batch_size, seq_len_life)),
-        'aid': torch.randint(0, 5000000, (batch_size, seq_len_life)),
+        'vid': torch.randint(0, config.vid_vocab_size, (batch_size, seq_len_life)),
+        'aid': torch.randint(0, config.aid_vocab_size, (batch_size, seq_len_life)),
         'tag': torch.randn(batch_size, seq_len_life, 100),
         'ts': torch.randn(batch_size, seq_len_life),
         'playtime': torch.randn(batch_size, seq_len_life),

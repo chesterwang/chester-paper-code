@@ -2,7 +2,6 @@
 Final integration test for OneRec model
 """
 import os
-import sys
 import torch
 from onerec.model import OneRec
 from onerec.training import OneRecTrainer, OneRecDataset
@@ -19,37 +18,9 @@ def test_onerec_integration():
 
     # Update config with test parameters
     config = OneRecConfig.get_instance()
-    config.num_query_tokens = 4
-    config.num_qformer_layers = 4
-    config.num_rq_layers = 3
-    config.codebook_size = 16
-    config.multimodal_hidden_dim = 32
-    config.qformer_hidden_dim = 32
-    config.encoder_model_dim = 32
-    config.num_encoder_layers = 6
-    config.max_seq_len = 2500
-    config.encoder_num_heads = 8
-    config.encoder_ff_dim = 128
-    config.uid_vocab_size = 1000 
-    config.vid_vocab_size = 1000 
-    config.aid_vocab_size = 300 
-    config.vid_dim = 32
-    config.aid_dim = 32
-    config.tag_dim = 32
-    config.ts_dim = 32
-    config.playtime_dim = 32
-    config.dur_dim = 32
-    config.label_dim = 32
-    config.decoder_model_dim = 32
-    config.num_decoder_layers = 6
-    config.decoder_num_heads = 8
-    config.decoder_ff_dim = 128
-    config.num_experts = 8
-    config.top_k = 2
-    config.user_dim = 32
-    config.item_dim = 32
-    config.num_objectives = 5
-    config.num_industrial_objectives = 3
+
+    # 单独修改某些参数
+    # config.num_query_tokens = 4
 
     # Initialize the complete OneRec model
     model = OneRec()
@@ -57,11 +28,6 @@ def test_onerec_integration():
     print(f"Model initialized successfully with {sum(p.numel() for p in model.parameters()):,} parameters")
     
     # Create dummy features for testing
-    # batch_size = 2
-    # seq_len_short = 20
-    # seq_len_pos = 256
-    # seq_len_life = 2000  # Before compression
-
     batch_size = 2
     seq_len_short = 20
     seq_len_pos = 30

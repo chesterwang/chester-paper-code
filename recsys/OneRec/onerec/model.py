@@ -38,12 +38,6 @@ class OneRec(nn.Module):
 
         # Initialize reward system
         self.reward_system = OneRecRewardSystem(
-            # user_dim=config.user_dim,
-            # item_dim=config.item_dim,
-            # vocab_size=config.codebook_size,
-            # num_rq_layers=config.num_rq_layers,
-            # num_objectives=config.num_objectives,
-            # num_industrial_objectives=config.num_industrial_objectives
         )
         
         # Cross-attention compatibility: ensure encoder and decoder have same model dim
