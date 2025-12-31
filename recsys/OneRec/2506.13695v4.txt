@@ -1,0 +1,2602 @@
+                                                                                              OneRec Technical Report
+                                                                                                                                    OneRec Team
+
+                                             Recommender systems have been widely used in various large-scale user-oriented platforms for many
+                                             years. Over the past decade, recommendation technology has evolved from traditional heuristic-based
+                                             rules to deep learning models, significantly improving recommendation accuracy. However, compared to
+                                             the rapid changes and developments in the AI community, recommendation systems have not achieved a
+                                             breakthrough in recent years. For instance, they still rely on a multi-stage cascaded architecture rather
+                                             than an end-to-end approach, leading to computational fragmentation and optimization inconsisten-
+arXiv:2506.13695v4 [cs.IR] 16 Sep 2025
+
+
+
+
+                                             cies. Additionally, the cascading structure has hindered the effective application of key breakthrough
+                                             technologies from the AI community in recommendation scenarios.
+                                             To address these issues, we propose OneRec, which reshapes the recommendation system through an
+                                             end-to-end generative approach. Under this new architecture, we have achieved promising results.
+                                             Firstly, we have enhanced the computational FLOPs of the current recommendation model by 10 × and
+                                             have identified the scaling laws for recommendations within certain boundaries. Secondly, reinforcement
+                                             learning (RL) techniques, previously difficult to apply for optimizing recommendations, show significant
+                                             potential in this framework. Lastly, through infrastructure optimizations, we have achieved 23.7% and
+                                             28.8% Model FLOPs Utilization (MFU) on flagship GPUs during training and inference, respectively, align-
+                                             ing closely with the LLM community. This architecture significantly reduces communication and storage
+                                             overhead, resulting in operating expense (OPEX) that is only 10.6% of traditional recommendation
+                                             pipelines. Deployed in Kuaishou/Kuaishou Lite APP, it handles 25% of total queries per second (QPS),
+                                             enhancing overall App Stay Time by 0.54% and 1.24%, respectively. Additionally, we have observed
+                                             significant increases in metrics such as 7-day Lifetime (LT7), which is a crucial indicator of recommen-
+                                             dation experience. We also provide practical lessons and insights derived from developing, optimizing,
+                                             and maintaining a production-scale recommendation system with significant real-world impact.
+
+
+
+
+                                                                     +2.0%
+                                                                             Online Performance                                                           FLOPs                                OPEX & MFU Comparison
+                                                                                                                                             11
+                                                                               Cascaded Recommendation                                  10                                                   120%
+                                                                                                                                                                                                      Cascaded Recommendation   30
+                                                                               OneRec: APP Stay Time     +0.08%                                                                                       Ranking Stage (SIM)
+                                                                     +1.5%     OneRec: LT7                                                                                                            OneRec
+                                                                                                                                        1010                                                                                    25
+                                         APP Stay Time Improvement
+
+
+
+
+                                                                                                         +0.06%                                                                              100%
+                                                                     +1.0%                                                              109
+                                                                                                              LT7 Improvement
+
+
+
+
+                                                                                                         +0.04%                                                                                                                 20
+                                                                                                                                                                             Relative OPEX
+
+
+
+
+                                                                                                                                                                                             80%
+                                                                                                                                                                                                                                    MFU (%)
+                                                                                                                                FLOPs
+
+
+
+
+                                                                     +0.5%                               +0.02%                         108                                                  60%                                15
+                                                                     +0.0%                               +0.00%                         107                                                  40%                                10
+
+                                                                     -0.5%                               -0.02%                         106                                                  20%                                5
+                                                                                                         -0.04%                         105
+                                                                     -1.0% Kuaishou      Kuaishou Lite                                            Linear DLRM   SIM OneRec                    0% OPEX Training MFU Inference MFU
+
+                                                                                      Figure 1 | Online performance, FLOPs, OPEX, and MFU comparison.
+
+
+
+
+                                                       © 2025 Kuaishou. All rights reserved
+                                           OneRec Technical Report
+
+
+
+Contents
+
+1 Introduction                                                                                             3
+
+2 Architecture                                                                                             5
+   2.1 Tokenizer . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .        5
+   2.2 Encoder . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .        7
+   2.3 Decoder . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .        9
+   2.4 Reward System . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .         10
+
+3 Training Framework                                                                                       13
+   3.1 Training Infrastructure . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .       13
+   3.2 Pre-training . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .      14
+   3.3 Post-training     . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   15
+
+4 Evaluation                                                                                               15
+   4.1 Evaluation Metric . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .       15
+   4.2 Scaling . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     16
+   4.3 Reinforcement Learning . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .          19
+   4.4 Tokenizer . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .       22
+   4.5 Online A/B Test . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .       23
+
+5 Conclusion, Limitations, and Future Directions                                                           24
+
+A Contributions                                                                                            29
+
+B Implementation Details of Online A/B Test                                                                30
+
+C Case Study for Tokenization                                                                              31
+   C.1 Representation Cases . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .        31
+   C.2 Tokenization Cases . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .        35
+
+D Notations                                                                                                37
+
+
+
+
+                                                                                                            2
+                                          OneRec Technical Report
+
+
+
+1. Introduction
+With the rapid advancement of online services, recommender systems (RS) have become essential
+infrastructure for mitigating information overload and delivering personalized content at scale (Ricci
+et al., 2010). During the past decades, recommender systems have achieved several breakthrough
+advancements - from early Factorization Machines (Rendle, 2010) to modern deep learning architec-
+tures (Cheng et al., 2016; Guo et al., 2017; Pi et al., 2020; Zhou et al., 2018). Despite the substantial
+progress made by the RS research community, traditional recommendation models still rely on multi-
+stage cascaded architectures (see the top part of Figure 2) rather than end-to-end approaches, which
+face several limitations that hinder their optimal performance:
+     Fragmented Compute. The cascaded architecture suffers from low computational efficiency.
+Our comprehensive analysis of resource distribution, using Kuaishou as a case study, reveals that
+over 50% of resources during serving are allocated to communication and storage rather than high-
+precision computation. This significant allocation to non-computational tasks highlights a fundamental
+inefficiency in the current architecture. Moreover, the resources dedicated to computation, particularly
+for the most computation-intensive ranking models, demonstrate markedly low utilization. Specifically,
+the model’s training and inference MFU is only 4.6% and 11.2% on flagship GPUs, respectively,
+which is substantially lower than the efficiency observed in large language models (LLMs),
+where the MFU is approximately 40% on H100 (Grattafiori et al., 2024; Shoeybi et al., 2019).
+This discrepancy underscores the inefficiency in resource utilization for computational tasks in
+recommender systems. Additionally, due to the high QPS requirements (greater than 400k) and
+low latency demands (less than 500ms), recommender models are often constrained to operate at a
+low scale and are not computation-intensive. This operational constraint further limits the potential
+for high-precision computation, thereby affecting the overall performance and scalability of the
+recommender system.
+    Objective Collision. What optimization objectives correspond to “good” recommendation results
+are not well-defined, which leads to the following conflict:
+   1) Conflicts from Diverse Objectives: Beyond common optimization goals like click-through rate
+and watch time, there are competing goals (hundreds of goals in Kuaishou) from users, creators,
+and platform ecosystems. These objectives intervene at various stages of the system, gradually
+undermining system consistency and increasing complexity and operational inefficiency.
+    2) Cross-Stage Modeling Conflicts: Even when modeling similar objectives, conflicts can arise due
+to different structures and sizes of models at various stages. For instance, the effectiveness of the
+retrieval stage might be constrained by the limitations of the ranking model, which, in turn, could be
+affected by suboptimal upstream results. This highlights the need for a more unified optimization
+goal and model structure across the recommendation system to ensure coherence and efficiency.
+    Lag Behind AI Evolution. While remarkable progress has been made in LLM and visual language
+model (VLM) domains (e.g., scaling laws (Henighan et al., 2020; Hoffmann et al., 2022; Kaplan et al.,
+2020), reinforcement learning (Ouyang et al., 2022; Rafailov et al., 2023; Shao et al., 2024; Ziegler
+et al., 2019)), the existing cascaded recommendation framework presents fundamental architectural
+barriers to adopting these proven techniques. This structural misalignment creates a widening gap
+between recommendation systems and mainstream AI advancements, limiting potential performance
+gains from state-of-the-art approaches.
+   To address the challenges faced by traditional cascaded recommendation architectures, we propose
+OneRec (See the bottom part of Figure 2), a novel recommendation system designed to overcome
+the limitations of cascade ranking systems by integrating retrieval and ranking processes into a
+
+
+                                                                                                       3
+                                                                    OneRec Technical Report
+
+
+
+                                                                                                     CascadedRec
+   Infrastructure                                                         Rule-1
+                                                                          Rule-2
+
+
+
+
+                                                                                                Pre-rank
+                                                 Retrieval
+                                                                                                                         …       …
+
+
+                                                                                                                         …       …
+
+
+
+
+                                                                   …
+
+
+
+
+                                                                                                                                                  Rank
+                                                                                                                                                         M4oE   M4oE        …
+
+                                                                                                                    …            …
+
+
+
+
+                                                                             …
+                                           !                                                "
+                                                                                                                                       ~10#
+                                                                                                                         …
+
+
+
+
+                                     ~10                                            ~10
+                                                                                                                                                          LN     LN
+
+                                                                                                                         …       …
+
+                                                                                                                                                                                …
+
+
+
+
+                                                                          Model-i                           Model-1     Model-j                           LN     LN
+
+
+
+
+                     …
+                                                                          Model-j
+
+    User Data Item Data                                                                                    Tokens                     Video ID
+
+                                                                                                                                                  𝑣𝑖𝑑𝑒𝑜'
+                                                                 ℒ$%&     Pre-train Loss                               Mapping
+                                      Train Phase                                                                                                 𝑣𝑖𝑑𝑒𝑜(
+                     …                                           ℒ+,&- Post-train Loss
+
+
+
+
+                                                                                                   …
+                                                                                                            …
+                                                                                                                  …
+
+
+
+
+                                                                                                                                         …
+
+                                                                                                                                                     …
+                                      Infer Phase 🔥                      Online Learning
+                                                                                                                                                  𝑣𝑖𝑑𝑒𝑜*
+     Reco Log
+                                      OneRec                                               Sampling (pass@k)
+                                                                                                                                           𝑟',
+              …
+
+
+
+
+                                                 Encoder 🔥                                 Decoder 🔥
+                                                                                                                                 Optimize 𝑟 ,
+                                                                                                                                             (                         Reward
+                                                                                                                                     ℒ+,&- … ,                         System 🔥
+                                                                                                                                             𝑟)
+                                                                                                                                                                       Select (optional)
+                          Tokens                                         …                                            ℒ$%&
+                   …
+     Server
+                                                             Tokenizer                             Tokenizer
+                          Training                           …               …                                …
+
+                          Samples              User Info            Context Info                    Item Info
+
+
+
+Figure 2 | Comparison between a cascaded recommender system and the OneRec. The cascaded
+approach system typically involves stages such as retrieval, pre-ranking, and ranking, each potentially
+employing multiple strategies or models. In contrast, OneRec adopts an encoder-decoder architecture
+to generate user-preferred videos in an end-to-end manner under the guidance of a reward model.
+
+
+single-stage encoder-decoder based generative framework. This approach exhibits the following
+characteristics:
+    ⊢ End-to-End Optimization: The system is designed to be both end-to-end and sufficiently simple
+to enable direct optimization for the final objective.
+    ⊢ Computational Efficiency: With a focus on computational intensity, the method rigorously
+optimizes computational utilization efficiency during both training and inference phases, thereby
+fully leveraging the benefits brought by computing power advancements.
+   Our new framework yields several significant findings:
+
+   ■ Through extensive infrastructure optimizations, we have achieved 23.7% and 28.8% MFU
+     on flagship GPUs during training and inference, respectively — representing 5.2× and
+     2.6× improvements over the original ranking model — significantly narrowing the gap with
+     the LLM community. More importantly, this end-to-end architecture dramatically reduces
+     unnecessary communication and storage overhead, resulting in OPEX that is merely 10.6%
+     of that associated with traditional complex recommendation pipelines. Currently, its
+     deployment in the main scenarios of the Kuaishou/Kuaishou Lite APP manages approximately
+     25% of total QPS, delivering improvements of 0.54% and 1.24% in App Stay Time, while
+     simultaneously improving all core metrics—including user engagement, video cold start, and
+     distribution balance — demonstrating comprehensive performance gains.
+   ■ We have enhanced the computational FLOPs of the current recommendation model by 10×.
+     Through this process, we have identified the scaling laws for recommendation systems. This
+     discovery provides valuable insights into how recommendation system performance can be
+
+                                                                                                                                                                                           4
+                                          OneRec Technical Report
+
+
+
+     optimized as model size and computational resources are scaled, ensuring efficient and effective
+     deployment in various operational contexts.
+   ■ Reinforcement learning (RL) techniques, which previously had shown limited impact in tradi-
+     tional architectures, now demonstrate substantial potential within our framework. We have
+     conducted extensive experiments with both offline and online performance comparisons and
+     have developed specific application practices tailored to meet real-world industrial iteration
+     requirements. These implementations enable the system to leverage RL, resulting in improved
+     adaptability and performance.
+
+    In the remainder of this paper, we first elaborate on the OneRec architecture (Section 2), detailing
+our tokenization pipeline for short videos, the encoder’s design for user interest modeling and
+compression, and scalable decoder optimization for precise output generation; we also introduce
+our reinforcement learning framework for recommendation optimization, discussing the impact
+of sampling space design, policy, and reward function on recommendation outcomes, along with
+empirical insights from production deployment. Next, we present the pre-training and post-training
+pipeline (Section 3), covering training data construction, hyperparameter configurations, and critical
+implementation discussions, followed by a description of the evaluation framework (Section 4),
+including offline metric systems and online performance/efficiency optimizations. Lastly, we conclude
+this work, discuss the existing limitations of OneRec, and propose potential directions for future
+research (Section 5).
+
+
+2. Architecture
+In this section, we present the OneRec architecture (as illustrated in the bottom part of Figure 2).
+The architecture first employs a tokenizer (Section 2.1) to convert videos into semantic IDs which
+serve as the prediction targets for the model. During the training phase, the encoder-decoder
+structure (Section 2.2 and Section 2.3) performs next token prediction to forecast target items, while
+simultaneously undergoing reinforcement learning alignment through the reward system (Section 2.4).
+In the inference phase, the model first generates semantic IDs and then maps these tokens back to
+video recommendations, with an optional reward-based selection step for further refinement.
+
+
+2.1. Tokenizer
+
+OneRec is a generative recommendation system at Kuaishou, while its billion-scale, ever-growing
+item space prevents generating atomic identifiers due to computational and architectural constraints.
+To resolve these, OneRec tokenizes items into coarse-to-fine semantic IDs using a reduced and fixed
+vocabulary, enabling knowledge transfer among similar items and better generalization to new items
+(Rajput et al., 2024). However, prior solutions (Rajput et al., 2024; Zheng et al., 2024) generate
+semantic IDs exclusively from context features, neglecting collaborative signals and yielding subop-
+timal reconstruction quality, as demonstrated in Section 4.4. Consequently, our solution integrates
+collaborative signals with multimodal features and then leverages RQ-Kmeans (Luo et al., 2024) to
+generate higher-quality hierarchical semantic IDs.
+
+2.1.1. Aligned Collaborative-Aware Multimodal Representation
+
+We integrate multimodal content with collaborative signals by aligning multimodal representations of
+collaboratively similar item pairs, as shown in Figure 3 (left). Therefore, we require the preparation
+of multimodal representations, item pairs, and an alignment strategy:
+
+
+
+                                                                                                      5
+                                                                                                    OneRec Technical Report
+
+
+                                                                                                                                                                                                                                           K-means Clustering
+                                 ℒ !"#$%&'_)*'                                              ℒ !"#$%&'_)*'
+                                                                                                                                                                                                                                                                          #
+                                                                                                                                                                                                                                                                      𝒄#                                          𝒄#%                𝒄%%
+                                                                                                                                                                                                𝒄#&
+
+                                                                                                                                                                                                                                                  𝒄&#                                                 𝒄&%
+                                    LLaMA3                                                     LLaMA3                                                                             𝒄&&
+                                                                                                                                                                                                               𝒄$&
+                                                                                                                                                                                                                                                                          𝒄%#
+                       compressed                                                                                compressed                                                                  𝒄%&                                                                                                            𝒄$%
+                               &
+                        tokens 𝐌                                         ℒ +,+                                           &
+                                                                                                                  tokens 𝐌                                                                                                                              𝒄$
+                                                                                                                                                                                                                                                            #                                                                centroid
+
+
+
+
+                                                                                                                                     𝑵"! query tokens 𝐐 𝒊
+𝑵"! query tokens 𝐐 𝒊
+
+
+
+
+                                                                                                                                                                                    Codebook 1                                                    Codebook 2                                               Codebook 3
+                             Q
+                                    QFormer          × 𝑁!
+                                                                                               QFormer          × 𝑁!
+                                                                                                                       Q
+                                        K/V                                                        K/V
+
+
+
+
+                                                                                                                                                            Nearest Code Search
+
+
+
+
+                                                                                                                                                                                                                     Nearest Code Search
+
+
+
+
+                                                                                                                                                                                                                                                                                Nearest Code Search
+                                                 …                                                          …
+                                                                                                                                                                                    $       $         $    $                                  %         %        %    %                                &          &      &       &
+                                                                                                                                                                                   𝒄$   𝒄%       𝒄&       𝒄'                                 𝒄$     𝒄%          𝒄&   𝒄'                               𝒄$     𝒄%         𝒄&     𝒄'
+                                        𝐌                                                           𝐌
+
+                                 miniCPM-V-8B                                              miniCPM-V-8B
+
+
+
+                       1 Cover + 5 Frames                                           1 Cover + 5 Frames
+                                                                                                                                                                                        -             =                                            -             =                                          -            =
+                                            Caption + Tag + OCR + ASR                                    Caption + Tag + OCR + ASR
+                                            #extremesports #skiing                                       #skiing #extremesports
+                                            Skiing Showcase                                              #snowboarding
+
+
+
+
+                                                                     Item Pairs 𝒟!"#$                                                                                                                           Item semantic identifiers (3, 4, 1)
+
+
+
+Figure 3 | Illustration of our tokenizer implementation. We first align multimodal representations of
+item pairs with high collaborative similarity to obtain collaborative multimodal representations, then
+tokenize these representations into discrete semantic IDs using RQ-Kmeans.
+
+
+                       • Multimodal Representations. We incorporate multimodal inputs for each video: the caption,
+                         tag, ASR (speech-to-text), OCR (image-to-text), the cover image, and 5 uniformly sampled
+                         frames. These inputs are processed using miniCPM-V-8B (Hu et al., 2024), generating 𝑁𝑀 = 1280
+                         token vectors M ∈ ℝ𝑁𝑀 × 𝑑𝑡 (𝑑𝑡 = 512). A Querying Transformer (QFormer) (Li et al., 2023) then
+                         compresses these tokens with 𝑁𝑀˜ = 4 learnable query tokens Q (1) ∈ ℝ𝑁𝑀˜ × 𝑑𝑡 :
+                                                                              
+                                            Q ( 𝑖+1) = CrossAttn Q ( 𝑖 ) , M, M ,                                    (1)
+                                                                         Q ( 𝑖+1) = FFN(RMSNorm(Q ( 𝑖+1) ) ,                                                                  for 𝑖 ∈ {1, 2, . . . , 𝑁𝑐 },                                                                                                                           (2)
+
+                         where M̃ = Q ( 𝑁𝑐 +1) ∈ ℝ𝑁𝑀˜ × 𝑑𝑡 denotes the compressed version of M, and 𝑁𝑐 = 4 denotes the
+                         number of QFormer layers.
+                       • Item Pairs. We construct high-quality item-pair dataset D 𝑝𝑎𝑖𝑟 via: 1) User-to-Item Retrieval:
+                         For each user, we take a positively clicked target item and pair it with the most collaboratively
+                         similar item from the user’s latest historical positive clicks, and 2) Item-to-Item Retrieval: We
+                         pair items exhibiting high similarity scores (e.g., the Swing similarity) (Yang et al., 2020).
+                       • Item-to-Item Loss and Caption Loss. We introduce dual training objectives: 1) An item-to-
+                         item contrastive loss aligns representations of collaboratively similar video pairs ( 𝑖, 𝑗) ∈ D 𝑝𝑎𝑖𝑟 ,
+                         capturing behavioral patterns, and 2) a caption loss prevents hallucination by performing next-
+                         token prediction on video captions using LLaMA3 (Dubey et al., 2024) as the decoder, thereby
+                         preserving content understanding capabilities.
+                                                                                                                   
+                                                           1    ∑︁                      exp       sim   M̃ 𝑖 , M̃ 𝑗  /𝜏
+                                               L 𝐼2𝐼 = −                  log Í                                        , (3)
+                                                         |B|
+                                                             ( 𝑖, 𝑗 ) ∈ B       ( 𝑖′ , 𝑗′ ) ∈ B exp sim M̃𝑖 , M̃ 𝑗′ /𝜏
+
+                                                                                                                ∑︁                                             
+                                                                                                                           log 𝑃 𝑡 𝑘+1 | 𝑡 1 , 𝑡 2 , · · · , 𝑡 𝑘 ,
+                                                                                                                                        
+                                                                                 L 𝑐𝑎𝑝𝑡𝑖𝑜𝑛_𝑔𝑒𝑛 = −                                                                                                                                                                                                                                   (4)
+                                                                                                                   𝑘
+
+                            where 𝜏 denotes the temperature coefficient, sim(·, ·) denotes the similarity function, B denotes
+                            a batch of D 𝑝𝑎𝑖𝑟 , 𝑡 𝑘 denotes the 𝑘-th caption token.
+
+
+                                                                                                                                                                                                                                                                                                                                           6
+                 User Interest Compression                                                                                                                      ×𝐿'$&
+
+                                                        ⋯                                            𝑩𝑶𝑺            𝒔𝟏𝒎      𝒔𝟐𝒎                 𝑳
+                                                                                                                                                𝒔𝒎𝒕
+                        Lifelong Pathway
+
+
+
+                                                                OneRec Technical Report
+
+
+
+                                                                                                                                        𝑳
+                                                                                                              𝒔𝟏𝒎          𝒔𝟐𝒎         𝒔𝒎𝒕
+
+
+                                                                                                                             ⊕
+                           Feed Forward                                                              ⊗                                      ⊗
+
+
+                            Add & RMS Norm
+                                                                                     Expert 1      Expert 2          Expert 3          Expert 4       ⋯ Expert NExperts
+
+                   Fully Visible Self-Attention                                     MoE Layer                              Router
+
+                                                                                                                     Add & RMS Norm
+  Encoder                                               ×𝐿$%&
+                                                                                  key/value
+                          ⋯                   ⋯                                                       Fully Visible Cross-Attention
+   User Static       Short-term     Positive-Feedback
+    Pathway           Pathway            Pathway                                                              Casual Self-Attention
+                                                                                  Decoder                                                                         ×𝐿'$&
+                   User Interest Compression
+
+                                                            ⋯                                         𝑩𝑶𝑺            𝒔𝟏𝒎         𝒔𝟐𝒎         𝒔𝒎𝒕
+                                                                                                                                                𝑳
+
+                           Lifelong Pathway
+
+
+                                  Figure 4 | Illustration of our encoder-decoder architecture.
+
+2.1.2. Tokenization
+
+We utilize RQ-Kmeans (Luo et al., 2024) for tokenization, which employs residual quantization to
+generate semantic IDs in a coarse-to-fine manner. This method constructs codebooks by applying
+K-means clustering directly on the residuals. An illustration of the RQ-Kmeans process is provided in
+Figure 3 (right).
+    Formally, the initial residual at layer 𝑙 = 1 is defined as:
+                                    R (1) = M̃𝑖 ∈ ℝ𝑁𝑀˜ × 𝑑𝑡 | ∀ video 𝑖 .
+                                            
+                                                                                                                                                                          (5)
+For each layer 𝑙, the codebook C ( 𝑙 ) is derived from K-means centroids of R ( 𝑙 ) :
+                                                                               
+                                                 C ( 𝑙 ) = K-means R ( 𝑙 ) , 𝑁𝑡 ,                           (6)
+               n                                         o
+where C ( 𝑙 ) = 𝒄𝑘( 𝑙 ) ∈ ℝ𝑁𝑀˜ × 𝑑𝑡 | 𝑘 = 1, . . . , 𝑁𝑡 and 𝑁𝑡 is the codebook size. The nearest centroid index
+for item 𝑖 is computed as:
+                                                                  (𝑙)       (𝑙)
+                                                 𝑠𝑖𝑙 = arg min R 𝑖 − 𝒄𝑘 ,                                   (7)
+                                                                          𝑘
+where ∥ · ∥ denotes the Euclidean norm. The residual of video 𝑖 for layer 𝑙 + 1 is then updated:
+                                                                R 𝑖( 𝑙+1) = R 𝑖( 𝑙 ) − 𝒄 (𝑙𝑙 ) .                                                                          (8)
+                                                                                           𝑠𝑖
+
+This quantization iterates across 𝐿𝑡 = 3 layers.
+     As demonstrated in Section 4.4, RQ-Kmeans offers enhanced reconstruction quality, better code-
+book utilization, and improved balance compared to the widely used RQ-VAE (Lee et al., 2022; Rajput
+et al., 2024). At this stage, each video 𝑚 can be represented by 𝐿𝑡 coarse-to-fine semantic identifiers:
+   1 , 𝑠2 , . . . , 𝑠 𝐿𝑡 }, which will serve as the output of the OneRec recommendation system, enabling
+{ 𝑠𝑚    𝑚            𝑚
+progressive item generation.
+
+2.2. Encoder
+
+2.2.1. Multi-Scale Feature Engineering
+
+This section presents the feature engineering component of OneRec. We process user behavior
+data through four specialized embedding pathways, each designed to capture distinct scales of user
+
+                                                                                                                                                                           7
+                                                 OneRec Technical Report
+
+
+
+interaction patterns: user static pathway, short-term pathway, positive-feedback pathway, and
+lifelong pathway.
+
+
+User Static Pathway The user static pathway generates a compact representation of core user
+characteristics, incorporating user identifier (uid), age (age), gender (gender), etc., which is then
+transformed into the model’s hidden dimension:
+
+                                     f𝑢 = [euid ; egender ; eage ; · · · ] ,                           (9)
+                                    h𝑢 = Dense(LeakyReLU(Dense(f𝑢 ))) .                               (10)
+
+where euid , egender , eage ∈ ℝ64 and h𝑢 ∈ ℝ1× 𝑑model .
+
+
+Short-term Pathway The short-term behavior pathway processes the most recent ( 𝐿𝑠 = 20) user
+interactions, incorporating video identifier (which can be represented as video identifiers vid or
+semantic identifiers sid as described in Section 2.1.2, we will discuss these two representation
+approaches in Section 4.2.2.), author identifiers (aid), tags (tag), timestamps (ts), playtime
+(playtime), duration (dur), labels (label, user interactions with each video, including like, follow,
+forward, dislike, comment, profile entry, etc.) This pathway produces representations that capture
+immediate user preferences and contextual factors influencing current behavior patterns:
+                                       𝑠
+                                f𝑠 = [evid    𝑠
+                                           ; eaid    𝑠
+                                                  ; etag    𝑠
+                                                         ; ets    𝑠
+                                                               ; eplaytime    𝑠
+                                                                           ; edur    𝑠
+                                                                                  ; elabel ],         (11)
+                               h𝑠 = Dense(LeakyReLU(Dense(f𝑠 ))) ,                                    (12)
+
+The feature dimensions are organized as follows: video embeddings evid    𝑠
+                                                                            match the model dimen-
+sion 𝑑model , author embeddings eaid use 512 dimensions, while all remaining features employ 128
+                                  𝑠
+
+dimensions. All features span 𝐿𝑠 sequence positions, yielding the final representation h𝑠 ∈ ℝ𝐿𝑠 × 𝑑model .
+
+
+Positive-feedback Pathway The positive-feedback behavior pathway operates on a sequence of
+high-engagement interactions ( 𝐿 𝑝 = 256). The pathway maintains the established dimensional
+structure:
+                                        𝑝      𝑝      𝑝
+                                f 𝑝 = [evid ; eaid ; etag ; ets𝑝 ; eplaytime
+                                                                    𝑝           𝑝
+                                                                             ; edur    𝑝
+                                                                                    ; elabel ],       (13)
+                               h 𝑝 = Dense(LeakyReLU(Dense(f 𝑝 ))) .                                  (14)
+
+All features span 𝐿 𝑝 sequence positions, yielding the final representation h 𝑝 ∈ ℝ𝐿 𝑝 × 𝑑model .
+
+
+Lifelong Pathway The lifelong behavior pathway is designed to process ultra-long user interaction
+histories with sequences of up to 100,000 videos. Directly applying attention mechanisms to such
+sequences is computationally prohibitive. This pathway employs a two-stage hierarchical compression
+strategy inspired by our previous work (Si et al., 2024).
+    Behavior Compression Using the multimodal content representations described in Section 2.1.1,
+we perform hierarchical K-means clustering on each user’s interaction sequence. To balance computa-
+tional efficiency and model effectiveness,
+                                √︁3         we dynamically adjust the number of clusters by setting the
+cluster count for each step to ⌊ | 𝐷 |⌋, where | 𝐷 | is the number of items in the current data. This is an
+empirically determined setting. The clustering process terminates when the number of items in the
+current cluster does not exceed a preset threshold 𝑀 . Upon termination, we select the item closest to
+each cluster center as the representative of that cluster.
+
+                                                                                                         8
+                                                     OneRec Technical Report
+
+
+
+    Feature Aggregation For each cluster, we construct representative features by handling discrete
+and continuous attributes differently. For sparse categorical features such as vid, aid, and label, we
+directly inherit the features from the representative video (i.e., the video closest to the cluster center).
+For continuous features such as tag, ts, playtime, and duration, we compute the average values
+across all videos within the cluster to capture collective behavioral patterns.
+     For the user’s long-term historical sequence ( 𝐿𝑙 = 2000), each video is replaced by the features of
+its corresponding cluster representative:
+                                      𝑙
+                               f𝑙 = [evid    𝑙
+                                          ; eaid    𝑙
+                                                 ; etag    𝑙
+                                                        ; ets    𝑙
+                                                              ; eplaytime    𝑙
+                                                                          ; edur    𝑙
+                                                                                 ; elabel ],              (15)
+                               v𝑙 = Dense(LeakyReLU(Dense(f𝑙 ))) .                                        (16)
+
+The final representation v𝑙 ∈ ℝ𝐿𝑙 × 𝑑model . The lifelong pathway compresses historical sequences through
+QFormer, where learnable query vectors h𝑙(0) ∈ ℝ𝑁𝑞 × 𝑑model ( 𝑁𝑞 = 128) attend to the processed historical
+features:
+
+                                        h𝑙( 𝑖+1) = CrossAttn(h𝑙( 𝑖 ) , v𝑙 , v𝑙 ) ,                        (17)
+                                        h𝑙( 𝑖+1) = FFN(RMSNorm(h𝑙( 𝑖+1) )) .                              (18)
+
+Followed by 𝑁𝑙 = 2 blocks, we obtain the compressed lifelong feature representation h𝑙 = h𝑙( 𝑁𝑙 ) ∈
+ℝ𝑁𝑞 × 𝑑model .
+
+2.2.2. Encoder Architecture
+
+As illustrated in Figure 4, the encoder architecture of OneRec integrates multi-scale user behavior
+representations through a unified transformer-based framework. The encoder concatenates the
+outputs from the four multi-scale pathways to form a comprehensive input sequence:
+
+                                              z (1) = [h𝑢 ; h𝑠 ; h 𝑝 ; h𝑙 ] + epos                        (19)
+
+where epos ∈ ℝ (1+𝐿𝑠 +𝐿 𝑝 +𝑁𝑞 ) × 𝑑model represents learnable positional embeddings. The integrated rep-
+resentation is processed through 𝐿enc transformer encoder layers, each consisting of fully visible
+self-attention mechanisms followed by feed-forward networks with RMS normalization:
+
+                                 z ( 𝑖+1) = z ( 𝑖 ) + SelfAttn(RMSNorm(z ( 𝑖 ) )) ,                       (20)
+                                     ( 𝑖+1)        ( 𝑖+1)                            ( 𝑖+1)
+                                 z            =z            + FFN(RMSNorm(z                   )) .        (21)
+
+The final encoder output zenc = z ( 𝐿𝑒𝑛𝑐 +1) ∈ ℝ (1+𝐿𝑠 +𝐿 𝑝 +𝑁𝑞 ) × 𝑑model provides a holistic multi-scale user
+behavior representation, serving as the foundation for subsequent recommendation generation.
+
+
+2.3. Decoder
+
+OneRec adopts a point-wise generation paradigm during the decoding phase. For each target video
+𝑚, the decoder input sequence is constructed by concatenating a learnable beginning-of-sequence
+token with the video’s semantic identifiers:
+                                                   1 2
+                                                                    𝐿
+                                   S𝑚 = 𝑠 [BOS] , 𝑠𝑚 , 𝑠𝑚 , · · · , 𝑠𝑚𝑡 ,                  (22)
+                                          d𝑚(0) = Emb_lookup(S𝑚 ) .                                       (23)
+
+
+
+
+                                                                                                             9
+                                              OneRec Technical Report
+
+
+
+The decoder processes this sequence through 𝐿dec transformer layers. Each layer performs sequential
+operations:
+
+                            d𝑚( 𝑖+1) = d𝑚( 𝑖 ) + CausalSelfAttn(d𝑚( 𝑖 ) ) ,                       (24)
+                              ( 𝑖+1)      ( 𝑖+1)                     ( 𝑖+1)
+                            d𝑚         = d𝑚        + CrossAttn(d𝑚             , Zenc , Zenc ) ,   (25)
+                            d𝑚( 𝑖+1) = d𝑚( 𝑖+1) + MoE(RMSNorm(d𝑚( 𝑖+1) )) .                       (26)
+
+Each decoder layer incorporates a Mixture of Experts (MoE) feed-forward network to enhance model
+capacity while maintaining computational efficiency. The MoE layer employs 𝑁experts expert networks
+with a top-𝑘 routing strategy:
+                                                    𝑘
+                                                   ∑︁
+                                  MoE(x) =               Gate 𝑗 (x) · Expert 𝑗 (x) ,              (27)
+                                                   𝑗=1
+
+where Gate 𝑗 (x) represents the gating weights determined by the routing mechanism, and Expert 𝑗 (x)
+denotes the output of the 𝑗-th selected expert network. To ensure balanced expert utilization without
+introducing interference gradients, we implement a loss-free load balancing strategy following (Liu
+et al., 2024).
+    The model is trained using cross-entropy loss for next-token prediction on the semantic identifiers
+of target video 𝑚:
+                                     𝑡 −1
+                                    𝐿∑︁                h                              i
+                          LNTP = −        log 𝑃 𝑠𝑚𝑗+1 | 𝑠 [BOS] , 𝑠𝑚
+                                                                   1 2               𝑗
+                                                                     , 𝑠𝑚 , · · · , 𝑠𝑚            (28)
+                                        𝑗=0
+
+
+
+2.4. Reward System
+
+The pre-trained model only fits the distribution of the exposed item space through next token
+prediction, and the exposed items are obtained from the past traditional recommendation system.
+This results in the model being unable to break through the ceiling of traditional recommendations.
+To address this issue, we introduce preference alignment based on a reward system, using on-policy
+reinforcement learning to train the model in the generated item space. Through rewards, the model
+perceives more fine-grained preference information. We introduce the preference reward to align
+user preferences, the format reward to ensure the generation format is as legal as possible, and the
+specific industrial reward to align with some special industrial scenario needs.
+
+2.4.1. User Preference Alignment
+
+In recommendation systems, defining a "good recommendation" is much more challenging than
+determining the correctness of a mathematical solution. Traditional approaches (Chang et al., 2023;
+Wang et al., 2024) often define multiple objectives, such as clicks, likes, comments, and watch time,
+which are then combined into a score through a weighted fusion of the predicted values (xtr) for each
+objective. However, manually tuning these fusion weights is challenging, not only lacking accuracy
+but also lacking personalization, and often results in optimization conflicts between objectives.
+   To address these limitations, we propose using a neural network to learn a personalized fusion
+score, referred to as P-Score (Preference Score) (Cao et al., 2025). The overall framework of this
+model is illustrated in Figure 5 (middle). The model’s underlying architecture is based on the Search-
+based Interest Model (SIM) (Pi et al., 2020). It includes multiple towers, each dedicated to learning
+specific objectives. During training, these towers compute binary cross-entropy (BCE) loss using the
+corresponding objective labels as auxiliary tasks. The hidden states of each tower, along with user
+
+                                                                                                    10
+                                                          OneRec Technical Report
+
+
+
+
+                 Encoder                                                                           Decoder
+
+   Preference Reward                                                                                           Video ID         Semantic ID
+                                  BCE                                BCE                 BCE
+                                      Click, Like, …
+                           P-Score Tower
+                                                                         Click
+                                                                 𝑐𝑡𝑟 Tower
+                                                                                           Like
+                                                                                     𝑙𝑡𝑟 Tower      …                 𝑣𝑖𝑑𝑒𝑜 "                 𝑜"
+                                                                                                                      𝑣𝑖𝑑𝑒𝑜 #                 𝑜#
+                      MLP                                               Preference Model
+
+
+
+
+                                                                                                                                              …
+                                                                                                                                 …
+                                                                                                                                     …
+                                                                                                                                         …
+                                                                                                                  …
+
+                                                                                                                         …
+                                                                                                                      𝑣𝑖𝑑𝑒𝑜 !                 𝑜!
+        User               Item                                        User                       Item
+       Industrial Reward                Video ID              Index            Item ID      Format Reward                       Semantic ID
+
+                                                                0          24313414               Hit
+     …                                                                                                          Hash
+                                                                1          73219473
+                                                                                                               Function
+
+
+
+
+                                                                                                                                     …
+                                                                                                                                         …
+                                                                                                                                 …
+                                            …
+
+                                                  …
+
+
+
+                                                                2          61841040
+     …          Content    Business
+               Ecosystem    Needs                               …                …                      Miss
+
+Figure 5 | Overall Framework of the Reward System. The Reward System is composed of three parts.
+They assign Preference Reward (P-Score), Format Reward, and specific Industrial Reward to the
+videos generated by the model, respectively.
+
+
+and item representations, are fed into the final layer’s Multi-Layer Perceptron (MLP). This MLP is
+followed by a single tower outputting the P-Score, which computes binary cross-entropy loss using
+the labels of all objectives.The loss can be formally represented as follows:
+                                                  ∑︁
+                                       LP-Score =      𝑤xtr LP-Score
+                                                             xtr
+                                                                                             (29)
+                                                                    𝑥𝑡𝑟 ∈ 𝑆𝑜
+
+                                    xtr
+                                   LP-Score = −( 𝑦 xtr log 𝑝 + (1 − 𝑦 xtr ) log (1 − 𝑝)) ,                                                   (30)
+                                                       𝑆𝑜 = {ctr, lvtr, ltr, vtr, ... }                                                      (31)
+We adjust the value of 𝑤xtr to bias the P-Score towards each objective, ultimately achieving an
+improvement in AUC across all objectives. This method allows the model to receive specific user
+information and adjust the Preference Score for that user appropriately, without compromising the
+experience of other users. Compared to the previous approach of indiscriminate weighted summation,
+this method is more likely to achieve Pareto optimization. Therefore, we use the P-Score obtained by
+this method as the reward for preference alignment.
+
+
+Early Clipped GRPO In this section, we introduce how to use the Preference Score to align user
+preferences. We use ECPO (Early Clipped GRPO) for optimization. Specifically, for a user 𝑢, we
+generate 𝐺 items using the old policy model. Each item, along with the user, is input into the
+Preference Reward Model to obtain the P-Score as reward 𝑟𝑖 . The optimization objective is as follows:
+                                             " 𝐺                                                            ! !#
+                                              1 ∑︁       𝜋𝜃 ( 𝑜𝑖 | 𝑢)            𝜋𝜃 ( 𝑜𝑖 | 𝑢)
+    J𝐸𝐶𝑃𝑂 ( 𝜃) = 𝔼𝑢∼𝑃 (𝑈 ) , { 𝑜𝑖 } 𝐺 ∼𝜋𝜃           min ′             𝐴𝑖 , clip ′             , 1 − 𝜖, 1 + 𝜖 𝐴𝑖 , (32)
+                                    𝑖=1  𝑜𝑙𝑑  𝐺         𝜋𝜃 ( 𝑜𝑖 | 𝑢)            𝜋𝜃 ( 𝑜𝑖 | 𝑢)
+                                                𝑖=1       𝑜𝑙𝑑                     𝑜𝑙𝑑
+
+
+
+
+                                                         𝑟𝑖 − mean({𝑟1 , 𝑟2 , ..., 𝑟𝐺 })
+                                                𝐴𝑖 =                                     ,                                                   (33)
+                                                             std({𝑟1 , 𝑟2 , ..., 𝑟𝐺 })
+
+
+
+                                                                                                                                               11
+                                                   OneRec Technical Report
+
+
+
+                                                                                                       Early-clip
+                       𝐴>0                                                        𝐴<0
+                                                                1 +𝜖 +𝛿
+           1 +𝜖                                                    1 +𝜖
+                                            No gradient
+               1                                                       1
+
+            1 −𝜖                                                   1 −𝜖
+                                                                                  No gradient
+
+                      1 −𝜖        1     1 +𝜖                                   1 −𝜖         1   1 +𝜖
+
+                                                    GRPO                   ECPO
+
+Figure 6 | Illustration of ECPO. The 𝑥 -axis is 𝜋𝜃 /𝜋𝜃𝑜𝑙𝑑 and the 𝑦 -axis is the clipped 𝜋𝜃 /𝜋𝜃𝑜𝑙𝑑 . Items with
+𝐴 > 0 are processed in the same way as the original GRPO, while items with 𝐴 < 0 are constrained by
+early-clipping to limit the maximum ratio.
+
+
+                                                                                    
+                              ′                    sg( 𝜋𝜃 ( 𝑜𝑖 |𝑢))
+                             𝜋𝜃𝑜𝑙𝑑 ( 𝑜𝑖 | 𝑢) = max                  , 𝜋𝜃𝑜𝑙𝑑 ( 𝑜𝑖 | 𝑢) ,    𝛿 > 0,                   (34)
+                                                     1+𝜖+𝛿
+where sg represents the stop gradient operation and 𝛿 is a hyperparameter greater than 0.
+     We make a modification to GRPO (Group Policy Relative Optimization) (Liu et al., 2024) to make
+its training process more stable. The illustration is presented in Figure 6. In the original GRPO, a
+large policy ratio (𝜋𝜃 /𝜋𝜃𝑜𝑙𝑑 ) is allowed for negative advantages, which can easily lead to gradient
+explosion. Therefore, we preemptively clip policies with large ratios to ensure training stability
+while still allowing corresponding negative advantages to take effect. The larger the 𝛿, the larger
+the tolerable policy ratio, which means the larger the tolerable gradient. This can be determined
+based on actual needs. In OneRec, we set 𝛿 to 0.1, which indicates that the ratio of policies with
+negative advantages is allowed to slightly exceed 1 + 𝜖. We remove the KL divergence loss because the
+Reinforcement Learning (RL) and Supervised Fine-Tuning (SFT) are trained together in OneRec, and
+the SFT loss ensures the model remains stable.
+
+2.4.2. Generation Format Regularization
+
+In generative recommendation, the legality ratio refers to the proportion of generated semantic ID
+sequences that can be mapped to actual item IDs. This metric is crucial for assessing the stability
+of generation. In practice, the cardinality of semantic ID sequences 𝑁𝑡𝐿𝑡 is much larger than that of
+videos. This ensures that all items are covered, and a larger vocabulary introduces more parameters,
+leading to better performance. However, this may also result in generating semantic ID sequences
+without corresponding item IDs during inference, i.e., illegal generation.
+    Introducing reinforcement learning with ECPO significantly increases the generation of illegal
+outputs. Recent work (Ren and Sutherland, 2024) suggests that this is due to the squeezing effect
+caused by negative advantages. As shown in Figure 7, the pre-trained model has learned to generate
+most of the legal tokens. After incorporating RL, items with 𝐴 > 0 only slightly adjust the distribution.
+When an item with 𝐴 < 0 is applied, the model’s probability distribution compresses most of the
+probability mass into what it currently considers the optimal output 𝑜∗ . This results in the probabilities
+of some legal tokens being squeezed to levels comparable to those of illegal tokens, making it difficult
+for the model to distinguish legal tokens.
+   To address this issue, we propose incorporating a format reward in reinforcement learning to
+encourage the model’s legal generation. Specifically, we randomly select 𝐾 samples from the 𝐺 samples
+
+
+                                                                                                                      12
+                                             OneRec Technical Report
+
+
+
+
+        𝜋!#$ (𝑜|𝑢)
+                     𝐴>0                                                𝜋!!" (𝑜|𝑢)      𝐴<0
+                               𝜋!!" (𝑜|𝑢)
+                                                         𝜋!#$ (𝑜|𝑢)                  Squeezing Effect
+
+
+
+
+     Legal           Legal   Legal      𝑜!                             𝑜∗              Legal     𝑜"     Legal
+
+
+Figure 7 | Illustration of squeezing effect. 𝜋𝜃𝑃𝑇 represents the pre-trained model, while 𝜋𝜃𝑅𝐿 represents
+the model trained with ECPO. 𝑜+ refers to videos with positive advantages, while 𝑜− refers to those
+with negative advantages.
+
+
+for legality reinforcement learning. For legal samples, we set the advantage to 1, and for illegal
+samples, we discard them directly to avoid the squeezing effect.
+                                            (
+                                              1 if 𝑜𝑖 ∈ 𝐼legal
+                                       𝐴𝑖 =                                                   (35)
+                                              0 if 𝑜𝑖 ∉ 𝐼legal
+
+The optimization objective formulation is the same as the ECPO (Equation 32) and we directly use 𝐴𝑖
+as advantages.
+
+2.4.3. Industrial Scenario Alignment
+
+In industrial scenarios, the recommendation system needs to consider not only user preferences
+but also various other aspects. For example, at Kuaishou, the ecosystem of the video community,
+commercialization needs, and the delivery of cold-start and long-tail videos. Traditional recommen-
+dation systems attempt to address these issues by applying algorithms or strategies at one stage of
+the recommendation pipeline. Due to inconsistencies across different stages, this can easily lead to
+a recurring cycle of unexpected problems emerging alternately. Engineers are forced to constantly
+make adjustments through patching, resulting in a bloated system over time that hinders iteration.
+In OneRec, we only need to incorporate optimization objectives into the reward system and adopt
+reinforcement learning to perform targeted optimization. This approach is not only convenient but
+also allows for end-to-end implementation, maintaining system consistency. We will provide an
+example of optimization practice in Section 4.3.3.
+
+
+3. Training Framework
+
+3.1. Training Infrastructure
+
+In this section, we describe our hardware and infrastructure that facilitated the large-scale pre-training
+of OneRec and introduce several optimizations that enhance training efficiency.
+Compute. We utilize 90 servers for training, each equipped with 8 flagship GPUs and 2 CPUs
+interconnected via 400Gbps NVLink to ensure high-speed intra-node bandwidth.
+Networking. Intra-node communication is managed by the efficient NVLink network, while inter-node
+communication is supported by 400Gbps RDMA for training traffic and 100Gbps TCP for training
+data and embedding prefetching operations.
+Storage. Each server is equipped with 4 NVMe SSDs to expedite checkpoint writes, allowing for the
+
+                                                                                                                13
+                                          OneRec Technical Report
+
+
+
+storage of large-scale embedding parameters and dense parameters in HDFS with minimal downtime
+for fault tolerance.
+Training Acceleration. For training acceleration, several core optimizations are implemented:
+    1) Embedding Acceleration: To manage the extensive embedding workload beyond CPU capacity,
+we utilize Kuaishou’s SKAI framework for GPU-based parameter servers. This framework leverages
+cross-GPU unified embedding tables, GPU caching paradigms, and prefetching pipelines to enhance
+training efficiency and reduce management overhead.
+   2) Training Parallelism: A combination of data parallelism, ZERO1 (Rajbhandari et al., 2020),
+and gradient accumulation is employed for model training. ZERO1 is selected because the current
+model’s dense parameters can be loaded on a single GPU, minimizing synchronization overhead in
+data parallel groups when interleaving multiple macro batches.
+   3) Mixed Precision Training: BFloat16 is used for computations in certain MLP networks to optimize
+performance.
+   4) Compilation Optimization: For attention networks, compilation optimizations are applied to
+reduce computational overhead.
+   Thanks to advancements in highly optimized training infrastructure, the model’s training MFU
+has improved to 23.7%, significantly narrowing the gap with the LLM training efficiency.
+
+
+3.2. Pre-training
+
+Pre-Training Data As illustrated in Section 2.2.1, our model takes multi-scale user behavior rep-
+resentations as input. The pre-training objective involves predicting sequences of target items for
+users. Each training sample comprises a target item which is tokenized into 3 semantic identifiers.
+This tokenization scheme results in 3 target tokens per training sample for the generative model’s
+next-token prediction task. Our training pipeline processes approximately 18 billion samples daily,
+yielding a throughput of 54 billion tokens per day. The OneRec-0.935B model (detailed in Table 1)
+achieves convergence after training on approximately 100 billion samples, corresponding to a total
+exposure of 300 billion tokens during pre-training.
+
+
+Key Hyperparameters The OneRec series comprises four models (two dense and two MoE variants)
+designed for recommendation tasks. Key architectural hyperparameters such as layer counts, hidden
+dimensions, and attention head numbers are detailed in Table 1. In these models, encoders and
+decoders have the same number of layers. For dense variants, the standard Feed-Forward Networks
+(FFNs) typically expand the hidden dimension 𝑑ff to 2 × 𝑑model . For the MoE variants, we replace
+standard FFNs with MoE layers in designated blocks, and employ SwiGLU FFNs (Shazeer, 2020;
+Thoppilan et al., 2022) as experts. Consistent with open-source MoE LLM settings (Fedus et al.,
+2022; Jiang et al., 2024), the hidden dimension for each SwiGLU expert is calculated as 23 × 4 × 𝑑model ,
+ensuring it is a multiple of 128.
+   The convergence curves for each model can be found in Section 4.2.1.
+
+
+
+
+                                                                                                      14
+                                               OneRec Technical Report
+
+
+
+                                                                             Post-Training
+                        …            Session
+                                                                                                               Send 𝜃
+                                                                   Reject Sampling Fine-Tuning                 With MQ
+                        …            Feedback
+
+
+                        …            Session                             Reinforcement Learning
+                        …            Feedback
+        …
+
+
+
+
+                                                                                             𝐼" , 𝑅#!
+                                                                           1% user
+                                   Generated Items 𝐼"
+          Reward System                                        Inference Service
+                                                                                       Encoder       Decoder
+                                                                     𝑓! (𝑢)
+                                      Reward 𝑅#!
+
+Figure 8 | The overall process of OneRec’s post-training, including continual pre-training and rein-
+forcement learning.
+
+
+Table 1 | OneRec model architectures. "Layers" = #Encoder + #Decoder. "FFN Hid. Dim" is FFNs’
+intermediate size or MoEs’ intermediate expert size.
+
+Model                     Layers    Hid. Dim       FFN Hid. Dim          Attn. Heads   Experts (Tot/Act)         MoE Loc.
+OneRec-0.015B (Dense)       4          128               256                  4                   N/A              N/A
+OneRec-0.121B (Dense)       8         1024              2048                  8                   N/A              N/A
+OneRec-0.935B (MoE)          8        1024              2048                  8                  24 / 2           Decoder
+OneRec-2.633B (MoE)         24        1024              2048                  8                  24 / 4          Enc & Dec
+
+
+
+3.3. Post-training
+
+In the post-training phase, we perform online training using real-time data streams. We simultaneously
+perform Reject Sampling Fine-Tuning (RSFT) and Reinforcement Learning (RL). For RSFT, we filter
+out the bottom 50% of exposure sessions based on play duration. The training loss is the same as the
+LNTP loss in the pre-training process, but we apply annealing by reducing the learning rate of sparse
+parameters to 1 × 10−4 and dense parameters to 8 × 10−5 . For RL, we randomly select 1% of users
+from the RSFT data to generate RL samples.
+    To maximize computational resource utilization, we decouple the generation of RL samples from
+the training process by using an external inference service. During training, 1% of users access the
+external service to generate 512 items, request rewards for each item from the reward model, and
+then return the data to the training task. The training task sends updated parameters to the external
+inference service via a Message Queue (MQ) every 1000 steps. The overall post-training process is
+summarized in Figure 8.
+
+
+4. Evaluation
+
+4.1. Evaluation Metric
+
+We assess model performance through the following metrics:
+• Cross-entropy loss: Next-token prediction loss LNTP curves.
+• P (preference)-Score: Learned comprehensive evaluation metric, as detailed in Section 2.4.1.
+
+
+                                                                                                                         15
+                                         OneRec Technical Report
+
+
+
+• xtr metrics: A set of user engagement indicators derived from a pre-trained ranking model (Chang
+  et al., 2023; Wang et al., 2024) currently deployed in our system, including:
+     – lvtr (Long View Through Rate): Predicted probability of significant video viewing
+     – vtr (View Through Rate): Predicted probability of video viewing
+     – ltr (Like Through Rate): Predicted probability of video liking
+     – wtr (Follow Through Rate): Predicted probability of the creator following
+     – cmtr (Comment Through Rate): Predicted probability of video commenting
+    For P-Score and xtr reward metrics, our evaluation system operates on streaming data where
+values may vary across different periods. Consequently, identical metrics may show different absolute
+values across experiments due to temporal variations in the data stream. However, we ensure reliable
+evaluation by conducting comparative experiments within the same periods and averaging results
+over sufficiently long observation windows, making our findings statistically confident.
+
+
+4.2. Scaling
+
+4.2.1. Training Scaling
+
+Parameters Scaling The OneRec series includes models of varying sizes: OneRec-0.015B, OneRec-
+0.121B, OneRec-0.935B, and OneRec-2.633B, as detailed in Table 1. We investigated the impact
+of model parameter count on performance. Figure 9 illustrates the loss curves for these models,
+demonstrating a clear scaling trend where larger models achieve lower loss as training progresses.
+This indicates a strong capability for performance improvement with increased model size.
+    Regarding the influence of training data size, our experiments show that performance converges
+rapidly within the initial approximately 10 billion samples. While the rate of improvement diminishes
+significantly beyond this point, performance does not completely plateau and continues to benefit,
+albeit more slowly, from additional data (i.e., beyond 100 billion samples). This suggests that while
+substantial gains are achieved early in training, further, more gradual improvements are possible with
+larger datasets.
+
+
+
+
+Figure 9 | Comparison of loss curves for different OneRec model sizes, showing loss scaling with
+training samples.
+
+
+
+                                                                                                   16
+                                          OneRec Technical Report
+
+
+
+     As model parameters scale up, load balancing among experts becomes a critical issue. Uneven
+expert utilization can lead to training inefficiency and suboptimal performance. We adopt DeepSeek’s
+loss-free load balancing strategy (Liu et al., 2024), which maintains expert utilization balance without
+introducing additional loss terms. With this strategy, we observe a loss reduction of 0.2, demonstrating
+its effectiveness in improving convergence for scaled OneRec models.
+    Beyond parameter scaling, we conduct additional experiments to validate the effectiveness of
+scaling across other key dimensions using our 0.935B model. These experiments encompass feature
+scaling (examining the impact of comprehensive feature engineering), codebook scaling (investigating
+the effect of vocabulary size expansion), and inference scaling (analyzing the influence of beam search
+parameters). Each dimension demonstrates distinct scaling behaviors and provides valuable insights
+for future model optimization.
+
+
+Feature Scaling To investigate the impact of feature engineering on model performance, we compare
+the model with two input configurations: a baseline using only item ID vid embeddings from
+256 positive-feedback items, and an enhanced version incorporating the comprehensive feature set
+described in our methodology. As shown in Figure 10 and Table 2, the enhanced model with additional
+features achieves lower training loss and substantial improvements across multiple dimensions of
+recommendation quality.
+
+
+
+                                                          Metric    w/o. feature   w/. feature    Impr.
+                                                          lvtr        0.4940         0.5500      11.34%
+                                                          vtr         0.8730         0.8901       1.96%
+                                                          ltr         0.0391         0.0441      12.79%
+                                                          wtr         0.0190         0.0224      17.89%
+                                                          cmtr        0.0919         0.1010       9.90%
+                                                          P-score     0.0749         0.0966      28.88%
+
+
+
+
+Figure 10 | Training loss comparison with and          Table 2 | Performance comparison with and with-
+without additional features.                           out additional features.
+
+
+Codebook Scaling To investigate the impact of codebook size on model performance, we experiment
+by expanding the codebook from 8,192 to 32,768. It is important to note that NTP loss, as defined in
+our parameter scaling experiments, cannot be directly used for comparison here. This is because an
+increase in codebook size inherently expands the candidate set for the cross-entropy loss calculation,
+rendering direct loss comparisons misleading. Consequently, we evaluate performance using reward-
+based metrics. The performance improvements across various metrics are presented in Table 3. As
+shown in the result, increasing the codebook size yields significant improvements in playtime metrics
+and a slight gain in interaction metrics.
+
+
+Infer Scaling We investigate the impact of different numbers of generated items in inference
+(Pass@K) on model performance. As detailed in Table 4, increasing K of Pass@K from 8 to 512
+results in consistent performance improvements across all evaluated metrics. However, further
+increasing K from 512 to 1,024 yields only marginal gains. Considering the trade-off between
+performance improvements and the associated computational resource consumption, we select
+K=512 for deployment in our production environment.
+
+                                                                                                          17
+                                          OneRec Technical Report
+
+
+
+ Metric    Size=8K   Size=32K   Impr.        Metric    Pass@8       Pass@64     Pass@512     Pass@1024     Impr.
+ lvtr      0.5118     0.5245    2.48%        lvtr      0.3675       0.4927       0.5351       0.5443      48.11%
+ vtr       0.9384     0.9491    1.14%        vtr       0.9444       0.9462       0.9513       0.9530       0.91%
+ ltr       0.0298     0.0299    0.34%        ltr       0.0278       0.0346       0.0425       0.0452      62.59%
+ wtr       0.0153     0.0154    0.65%        wtr       0.0114       0.0138       0.0182       0.0197       72.81%
+ cmtr      0.0650     0.0664    2.15%        cmtr      0.0350       0.0566       0.0809       0.0891      154.57%
+ P-score   0.2516     0.2635    4.75%        P-score   0.0811       0.2051       0.3375       0.3859      376.10%
+
+
+Table 3 | Codebook Scaling.              Table 4 | Inference Pass@K Scaling.
+
+
+4.2.2. Semantic Identifier Input Representation
+
+As model sizes scale to billions of parameters, we explore an alternative input representation strategy
+that leverages video semantic identifiers for user interaction histories instead of constructing separate
+sparse embeddings for video identifiers (vid). This semantic identifier input achieves performance
+comparable to traditional sparse embedding methods, while offering significant advantages in param-
+eter efficiency, communication overhead, and sequence processing capacity that make it particularly
+promising for further scaling exploration.
+
+
+Scaling Performance Analysis As shown in Figure 11, our empirical analysis reveals that at scale
+(2.6B parameters), the semantic identifier input approach achieves performance comparable to or
+exceeding traditional sparse embedding methods.
+
+
+
+                                                          Metric        VID       Semantic ID     Impr.
+                                                          lvtr         0.4447       0.4467        0.45%
+                                                          vtr          0.8725       0.8726        0.01%
+                                                          ltr          0.0336       0.0336        0.00%
+                                                          wtr          0.0104       0.0105        0.96%
+                                                          cmtr         0.0565       0.0573        1.42%
+                                                          P-score      0.0371       0.0378        1.74%
+
+
+
+
+Figure 11 | Training loss comparison between            Table 5 | Performance comparison between
+OneRec-2.633B with semantic identifier input            OneRec-2.633B with semantic identifier input
+and sparse embedding input.                             and sparse embedding input.
+
+
+Advantages and Future Scaling The semantic identifier approach provides several key advantages
+over traditional sparse embedding methods, making it particularly attractive for further scaling
+exploration:
+
+   • Parameter Efficiency: By sharing embeddings between input and output representations, the
+     model eliminates the need for separate sparse embedding tables for vid. This dramatically
+     reduces the total parameter count, particularly for Kuaishou with billions of items.
+   • Communication Efficiency: In distributed training environments, sparse embedding operations
+     require extensive parameter server communication for embedding lookup and gradient updates.
+     The semantic identifier approach reduces communication overhead by leveraging dense opera-
+     tions and shared vocabulary, leading to faster training throughput and reduced communication
+     bottlenecks.
+
+                                                                                                                    18
+                                                OneRec Technical Report
+
+
+
+   • Extended Sequence Capacity: The elimination of large sparse embedding tables enables the
+     allocation of computational resources toward processing longer user interaction sequences. This
+     allows the model to capture more comprehensive user preference evolution patterns, potentially
+     extending sequence lengths from thousands to tens of thousands of interactions.
+   • Representation Consistency: Sharing the same semantic space between input and output
+     ensures representational consistency and enables the model to learn more coherent item-to-item
+     relationships. This unified representation has the potential to facilitate better generalization
+     across different recommendation scenarios.
+
+    Given these compelling advantages and the competitive performance demonstrated at the 2.6B
+parameter scale, we are actively pursuing further scaling exploration based on semantic identifier input
+representation. This approach promises to unlock new possibilities for large-scale recommendation
+systems while maintaining computational efficiency and architectural elegance.
+
+
+4.3. Reinforcement Learning
+
+4.3.1. User Preference Alignment
+
+Defining what constitutes a "good" recommendation has always been a challenging task. To rigorously
+verify RL’s impact, we use the single-objective vtr (view-through rate) as the reward, which corresponds
+to online metrics such as Watch Time and App Stay Time. The reported online results are relative
+improvements compared to Kuaishou’s traditional recommendation system, referred to as the overall
+baseline. Relative Impr. in the table indicates the relative enhancement of the latter group over the
+former group.
+   Notably, while using vtr as the reward can significantly improve duration metrics, it does not
+necessarily indicate a high-quality recommendation, as other metrics, such as Video View, which
+represent the number of videos viewed, may decrease significantly. We primarily focus on Watch Time
+and App Stay Time to find the optimal RL setting, and ultimately use it to validate the benefits of the
+P-Score reward.
+
+
+Sampling Efficiency Reinforcement learning optimizes the probability distribution of sampled
+items to increase the likelihood of selecting high-reward items, thereby significantly enhancing
+sampling efficiency. To quantify this effect, we conduct multi-point sampling experiments at pass@32,
+pass@128, and pass@512, with results summarized in Table 6. Treating the model without RL as the
+baseline, we define the improvement in app stay time as the sampling efficiency gap. Notably, RL shows
+the most substantial improvement gap at pass@32, indicating that the accuracy of top-ranked items
+is significantly enhanced. This improvement is crucial for reducing sampling overhead, as it ensures
+high precision when sampling a small number of items. In recommendation systems, balancing cost
+and benefit is essential, and the enhanced accuracy at lower sample numbers 𝐾 provides a solid
+foundation for achieving this balance.
+
+
+Search Space In ECPO training, expanding the action search space increases the likelihood of dis-
+covering the optimal item with maximum reward, albeit at higher computational costs. To investigate
+this trade-off, we examine how the search space size (i.e., group size) affects performance. The results
+for pass@128 are summarized in Table 7. From Table 7, we observe a significant improvement in
+performance when the group size is increased from 128 to 512. This clearly demonstrates the positive
+   1 Video View is provided for reference only, as our primary focus is on Watch Time and App Stay Time to determine the
+optimal RL setting.
+
+
+                                                                                                                     19
+                                           OneRec Technical Report
+
+
+
+                    Method               vtr         Watch time      App Stay Time   Video View1
+                    OneRec w/o RL        0.1978      +1.62%          -0.10%          -4.18%
+       Pass@32      OneRec w/ RL         0.2138      +3.17%          +0.39%          -9.87%
+                    Relative Impr.       +8.08%      +1.55%          +0.49%↑↑↑       -3.69%
+                    OneRec w/o RL        0.2239      +4.61%          +1.11%          -12.75%
+       Pass@128     OneRec w/ RL         0.2387      +5.22%          +1.49%          -15.06%
+                    Relative Impr.       +6.61%      +1.53%          +0.38%↑↑        -2.65%
+                    OneRec w/o RL        0.2444      +6.32%          +1.66%          -15.54%
+       Pass@512     OneRec w/ RL         0.2494      +5.88%          +1.75%          -13.88%
+                    Relative Impr.       +2.05%      -0.41%          +0.09%↑         +1.97%
+
+Table 6 | The impact of reinforcement learning under different numbers of generated items (Pass@K)
+during inference.
+
+
+impact of expanding the search space. It is somewhat disappointing that increasing the search space
+to 2048 does not yield much additional benefit, which might be due to the current reference model’s
+diversity not being sufficient to discover more and better items. Nonetheless, this finding is promising,
+and we empirically suggest setting the ECPO training group size to approximately four times the
+inference output quantity for optimal results.
+
+                 Group Size      vtr      Watch time        App Stay Time    Video View1
+                 0(w/o RL)      0.2198         +4.61%          +1.11%          -12.75%
+                 128            0.2303         +5.22%          +1.49%          -15.06%
+                 512            0.2350         +5.73%          +1.82%          -15.49%
+                 2048           0.2352         +5.84%          +1.78%          -15.49%
+
+Table 7 | Performance of different group sizes when calculating ECPO loss on Pass@128.
+
+
+Search Strategy Reinforcement learning for large language models typically employs top-𝑘 and
+top- 𝑝 sampling for sample generation. In OneRec, we also explore beam search as an alternative
+strategy. Table 8 compares the results of these two approaches, revealing that beam search signifi-
+cantly outperforms top-𝑘 and top- 𝑝 sampling in OneRec’s reinforcement learning framework. This
+improvement stems from the inherent regularity of semantic ID structures, which follow a prefix tree
+encoding scheme and thus align well with the systematic exploration of beam search.
+
+                                   vtr         Watch time    App Stay Time     Video View1
+               Top-𝑘+Top- 𝑝     0.2131          +4.45%           +1.16%          -13.61%
+               Beam Search      0.2162          +5.35%           +1.76%          -13.30%
+               Relative Impr.   +1.45%          +0.87%           +0.60%          +0.36%
+
+Table 8 | Performance of reinforcement learning with different search strategies.
+
+
+
+Reference Model In this section, we compare two reference models for strategy generation in ECPO:
+(1) the pre-trained model (off-policy) and (2) the current policy model (on-policy). The experimental
+
+
+                                                                                                      20
+                                             OneRec Technical Report
+
+
+
+results are summarized in Table 9. From the table, it is evident that using the current policy model
+yields better results, especially in offline reward evaluation. This indicates that the on-policy approach
+allows the model to continuously teach itself, breaking through the limitations of the reference model
+and achieving a higher upper limit. However, in terms of online performance, the improvement with
+the on-policy approach is not very significant. This is due to the suboptimal definition of the reward,
+leading to slight reward hacking. We will focus on this aspect as a key direction for future work.
+
+           Reference Model             vtr         Watch time          App Stay Time   Video View1
+           Pre-trained Model         0.2262         +5.35%               +1.51%         -13.51%
+           Current Policy Model      0.2389         +6.19%               +1.56%         -13.89%
+           Relative Impr.            +5.61%         +0.79%               +0.04%         -13.89%
+
+Table 9 | Performance of reinforcement learning with different reference models.
+
+
+
+P-Score Reward In this section, we observe the comprehensive improvements achieved through
+reinforcement learning when using P-Score as the reward. Based on the conclusions from the above
+ablation experiments, we select the optimal RL setting, which involves using beam search for RL
+sample generation and employing the current policy model as the reference model. We examine the
+impact of RL in two scenarios, including Kuaishou and Kuaishou Lite, with the results summarized
+in Table 1. From the table, we can conclude that in both scenarios, P-Score significantly improves
+App Stay Time and Watch Time while also increasing Video View, indicating an enhancement in the
+overall user recommendation experience.
+
+                     Scenario         Watch time         App Stay Time        Video View
+                     Kuaishou           +0.21%               +0.26%            +0.17%
+                     Kuaishou Lite      +0.71%               +0.22%            +0.35%
+
+Table 10 | The relative improvement of OneRec with P-Score Reward compared to without it in the
+Kuaishou and Kuaishou Lite scenarios.
+
+
+4.3.2. Generation Format Regularization
+
+In this section, we conduct experiments to verify the effectiveness of format reward. As mentioned
+in Section 2.4.2, after incorporating reinforcement learning into the pre-trained model, the legality
+of the model’s output significantly drops to below 50% due to the squeezing effect. This means
+that more than half of the generated semantic IDs do not correspond to actual video IDs, which is
+detrimental to the stability of recommendations and the scalability of inference. We evaluate the
+impact of format reward by comparing two sample selection methods for computing format loss: (1)
+selecting the top-5 highest-probability samples from 128 generated candidates, and (2) randomly
+selecting 5 samples.
+    Figure 12 illustrates their effects on output legality. The left figure shows legality rates across
+all 128 generated samples, while the right panel focuses on the selected samples. Without format
+rewards, baseline legality remains below 50%. The Top-k Selection approach produces an interesting
+pattern: while overall legality initially rises then falls, the selected samples rapidly achieve 100%
+legality, suggesting the model learns to generate legal outputs only within the top-ranked subset.
+In contrast, Random Selection presents a more challenging learning objective, yet drives steady
+improvement - ultimately reaching 95% legality without showing a decline.
+
+                                                                                                       21
+                                                      OneRec Technical Report
+
+
+
+    Notably, format reward integration yields benefits beyond legality alone. Online metrics demon-
+strate substantial gains: +0.13% in APP Stay Time and +0.30% in Watch Time. This experimental
+case not only validates the format reward mechanism but also highlights the critical role of careful
+reward design in reinforcement learning systems.
+
+                          Legality of Generated Items                                Legality of the Format Loss Samples
+                   1.0                                                         1.0
+        Legality
+
+
+
+
+                                                                    Legality
+                   0.5                                                         0.5
+
+
+
+                         Add Format Reward                                             Add Format Reward
+                                                 Random Selection                                               Random Selection
+                                                 Topk Selection                                                 Topk Selection
+                    0                                                           0
+                                 Training Step                                                  Training Step
+
+
+Figure 12 | The impact of training with format reward with samples obtained through different
+sampling strategies on the model’s legality.
+
+
+
+4.3.3. Industrial Scenario Alignment
+
+In this section, we present a practical example of using reinforcement learning to address industrial
+challenges. On the Kuaishou platform, viral content farms represent a significant portion of content
+creators, primarily producing repurposed and clipped videos with inconsistent quality. While OneRec
+demonstrates superior performance over traditional recommendation systems across multiple business
+metrics, we observe that without proper post-filtering strategies, the exposure ratio of viral content
+increases significantly, which may negatively impact the platform’s ecosystem.
+    The optimal proportion of viral content videos can be set to 𝑓 . When the proportion exceeds 𝑓 ,
+we down-weight their P-score reward to suppress them while maintaining the system’s perception of
+the quality of these contents.             (
+                                       ′     𝑟𝑖  if 𝑜𝑖 ∉ 𝐼viral
+                                      𝑟𝑖 =                      ,                             (36)
+                                             𝛼𝑟𝑖 if 𝑜𝑖 ∈ 𝐼viral
+
+where 𝛼 ∈ (0, 1) is the suppression factor.
+    We term this approach Specific Industrial Reward (SIR). Experimental results show that SIR
+effectively reduces viral content exposure by 9.59% while maintaining stable performance on core
+metrics (Watch time and APP Stay Time). This experiment highlights OneRec’s key advantage: the
+ability to achieve precise and consistent optimization through reinforcement learning’s reward-shaping
+capability, a feature fundamentally unavailable in traditional recommendation systems.
+
+
+4.4. Tokenizer
+
+We employ three metrics to comprehensively evaluate our tokenization method, encompassing aspects
+of accuracy, resource utilization, and distribution uniformity:
+
+• Reconstruction Loss: This metric assesses the accuracy with which discrete tokens reconstruct the
+  original input, serving as an indicator of the model’s fidelity in preserving the input data.
+• Codebook Utilization (Zhu et al., 2024): This metric evaluates the efficiency of vector usage
+  within the codebook, reflecting how effectively the model leverages available resources to represent
+
+                                                                                                                                   22
+                                          OneRec Technical Report
+
+
+
+  data.
+• Token Distribution Entropy (Bentz and Alikaniotis, 2016): Utilizing Shannon entropy, this
+  metric quantifies the uniformity of token distribution, providing insight into the diversity and
+  balance of token allocation across the model.
+
+Table 11 | Performance comparison of tokenization algorithms with a three-layer 8,192 codebook.
+
+                                                                    RQ-VAE   RQ-Kmeans
+                  Reconstruction Loss ↓                             0.0548    0.0410
+                                                     layer 1        1.0000    1.0000
+                  Codebook Utilization ↑             layer 2        0.9963    1.0000
+                                                     layer 3        0.9958    1.0000
+                                                     layer 1        8.3892    8.9191
+                  Token Distribution Entropy ↑       layer 2        8.4805    8.7770
+                                                     layer 3        8.6037    8.7276
+
+    As shown in Table 11, compared to RQ-VAE, RQ-Kmeans’s reconstruction loss is reduced by
+25.18%, demonstrating superior accuracy in preserving input information. Simultaneously, RQ-
+Kmeans achieves perfect utilization (1.0000) in all three layers, indicating optimal resource efficiency
+in the codebook, while RQ-VAE shows slightly lower utilization rates in layers 2 and 3. Furthermore,
+RQ-Kmeans exhibits higher entropy values in all three layers compared to RQ-VAE, with significant im-
+provements of 6.31%, 3.50%, and 1.44% in layers 1, 2, and 3, respectively, suggesting that RQ-Kmeans
+produces a more uniform and balanced token distribution, which is beneficial for model stability and
+generalization capability. These comprehensive results demonstrate that RQ-Kmeans outperforms
+RQ-VAE across all three evaluation metrics, making it a more effective choice for tokenization.
+   Further qualitative analyses of item representation and tokenization quality are provided in
+Appendix C.
+
+4.5. Online A/B Test
+
+We deployed OneRec in two major short-video scenarios on Kuaishou: the main Kuaishou feed and
+Kuaishou Lite feed - the platform’s highest-traffic scenarios with daily active users of 400 million.
+Using a 5% traffic experimental group observed over one week, our primary metrics were APP
+Stay Time (reflecting total user engagement time) and LT7 (7-day Lifetime). Two experimental
+groups were established: one employing a pure generative model (OneRec) and another augmenting
+generative outputs with reward model based selection (OneRec with RM Selection). As shown in Table
+12, the pure generative model with RL-based user preference alignment remarkably matched the
+performance of the entire complex recommendation system. Further applying reward model selection
+achieved statistically significant improvements of +0.54% and +1.24% in APP Stay Time, and
++0.05% and +0.08% in LT7 on these two scenarios, respectively. Notably, improvements of 0.1%
+in APP Stay Time and 0.01% in LT7 are already considered statistically significant on Kuaishou.
+Additionally, OneRec demonstrated significant gains across all interaction metrics (likes, follows,
+comments, etc.), indicating its ability to converge multi-task systems to a more balanced equilibrium
+without seesaw effects. After validation, we’ve expanded deployment to approximately 25% of total
+QPS, with implementation details available in Appendix B.
+    In addition to Kuaishou’s short video recommendation scenarios, experiments have also been
+conducted in one of its significant business scenes — Local Life Service. The results demonstrate that
+OneRec achieves a 21.01% growth in GMV, a 17.89% increase in order volume, an 18.58% rise
+in buyer numbers, and a 23.02% increase in new buyer acquisition. Consequently, the system
+
+                                                                                                     23
+                                         OneRec Technical Report
+
+
+
+has now taken over 100% of QPS for this business scenario. After full deployment, we observe even
+stronger growth across all metrics compared to the initial experimental phase. These results prove
+OneRec’s generalizability across diverse business contexts for enhanced recommendation performance.
+
+Table 12 | The absolute improvement of OneRec compared to the current multi-stage system in the
+online A/B testing setting.
+
+  Scenarios             Online Metrics           OneRec                 OneRec with RM Selection
+                        App Stay Time            +0.01%                 +0.54%
+                        Watch Time               +0.07%                 +1.98%
+                        Video View               +1.98%                 +2.52%
+                        Like                     -2.00%                 +2.43%
+  Kuaishou
+                        Follow                   -2.88%                 +3.24%
+                        Comment                  -1.56%                 +5.27%
+                        Collect                  -0.61%                 +2.93%
+                        Foward                   +0.27%                 +5.90%
+                        App Stay Time            +0.06%                 +1.24%
+                        Watch Time               +0.05%                 +3.28%
+                        Video View               +2.40%                 +3.39%
+                        Like                     -2.64%                 +1.49%
+  Kuaishou Lite
+                        Follow                   -2.75%                 +2.28%
+                        Comment                  -2.23%                 +3.20%
+                        Collect                  -1.76%                 +1.91%
+                        Foward                   -1.86%                 +3.48%
+
+Infrastructure and Efficiency We utilize NVIDIA L20 GPUs for inference, and each server is equipped
+with 4 GPUs and 2 CPUs, connected via PCIe. We adopt Kuaishou’s prediction platform - UniPredict to
+support online traffic. The inference service and embedding service are deployed in a 200Gb RDMA
+data center, leveraging RoCE networking. The maximum inter-machine communication bandwidth
+reaches 800Gb. In order to improve the efficiency, we employ TensorRT to compile and optimize the
+model’s computation graph. Through custom plugins, we achieve high-performance implementations
+of cross-attention, MoE, and other operations. Combined with batching and MPS techniques, we
+achieve a 5 × throughput improvement, reaching an MFU of 28.8%.
+
+
+5. Conclusion, Limitations, and Future Directions
+In this paper, we introduce OneRec, a novel end-to-end generative recommendation architecture. Built
+as an encoder-decoder model, it compresses users’ lifelong behavior sequences via its encoder to derive
+user interests, while leveraging Mixture-of-Experts (MoE) to massively scale decoder parameters
+for precise short-video recommendation decoding. During post-training, we develop a customized
+reinforcement learning (RL) framework to refine recommendations by aligning model outputs with the
+
+                                                                                                     24
+                                         OneRec Technical Report
+
+
+
+reward function. Thanks to meticulous engineering optimizations, OneRec achieves 23.7% and 28.6%
+Model FLOPs Utilization (MFU) in training and inference — a dramatic improvement from single-digit
+baselines — closing the gap with the mainstream AI community. Notably, this compute-intensive design
+operates at 10.6% the OPEX of conventional recommender systems. Comprehensive evaluations
+demonstrate that OneRec has surpassed existing recommendation systems in both effectiveness
+and efficiency. While acknowledging its powerful performance and high cost-effectiveness, we also
+recognize some limitations of OneRec and plan to strategically invest in the following areas:
+• Inference Stage Scaling: The step scaling during the inference phase is not yet apparent, indicating
+  that OneRec currently lacks strong reasoning capabilities.
+• Multimodal Integration: OneRec has not yet integrated with LLMs (Large Language Models) and
+  VLMs (Vision Language Models). User behavior is also a modality, and in the future, we plan to
+  design solutions that allow user behavior modality to become a native multimodal model, similar
+  to vision and audio alignment.
+• Reward System Design: The reward system design is still very rudimentary, which is an exciting
+  aspect. Historically, recommendation systems were not end-to-end, making it difficult to define
+  and iterate on what constitutes a good recommendation result. Under the OneRec architecture,
+  the reward system impacts both online results and offline training. We believe that the structure
+  will soon lead to technological breakthroughs in the reward system for recommendations.
+    OneRec establishes an entirely new architecture, introducing a transformative framework for
+technological evolution, business value optimization, and team collaboration. While currently not yet
+deployed across all traffic scenarios in Kuaishou, we have adopted this as our foundational approach
+to systematically push the boundaries of algorithmic innovation while refining team collaboration
+mechanisms, thereby building scalable infrastructure capable of supporting traffic growth at scale.
+
+
+
+
+                                                                                                   25
+                                           OneRec Technical Report
+
+
+
+References
+C. Bentz and D. Alikaniotis. The word entropy of natural languages. arXiv preprint arXiv:1606.06996,
+  2016.
+
+J. Cao, P. Xu, Y. Cheng, K. Guo, J. Tang, S. Wang, D. Leng, S. Yang, Z. Liu, Y. Niu, et al. Pantheon:
+   Personalized multi-objective ensemble sort via iterative pareto policy optimization. arXiv preprint
+   arXiv:2505.13894, 2025.
+
+J. Chang, C. Zhang, Z. Fu, X. Zang, L. Guan, J. Lu, Y. Hui, D. Leng, Y. Niu, Y. Song, et al. Twin:
+   Two-stage interest network for lifelong user behavior modeling in ctr prediction at kuaishou. In
+   Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining, pages
+   3785–3794, 2023.
+
+H.-T. Cheng, L. Koc, J. Harmsen, T. Shaked, T. Chandra, H. Aradhye, G. Anderson, G. Corrado, W. Chai,
+  M. Ispir, et al. Wide & deep learning for recommender systems. In Proceedings of the 1st workshop
+  on deep learning for recommender systems, pages 7–10, 2016.
+
+A. Dubey, A. Jauhri, A. Pandey, A. Kadian, A. Al-Dahle, A. Letman, A. Mathur, A. Schelten, A. Yang,
+  A. Fan, et al. The llama 3 herd of models. arXiv preprint arXiv:2407.21783, 2024.
+
+W. Fedus, J. Dean, and B. Zoph. A review of sparse expert models in deep learning. arXiv preprint
+ arXiv:2209.01667, 2022.
+
+A. Grattafiori, A. Dubey, A. Jauhri, A. Pandey, A. Kadian, A. Al-Dahle, A. Letman, A. Mathur, A. Schelten,
+  A. Vaughan, et al. The llama 3 herd of models. arXiv preprint arXiv:2407.21783, 2024.
+
+H. Guo, R. Tang, Y. Ye, Z. Li, and X. He. Deepfm: a factorization-machine based neural network for
+  ctr prediction. arXiv preprint arXiv:1703.04247, 2017.
+
+T. Henighan, J. Kaplan, M. Katz, M. Chen, C. Hesse, J. Jackson, H. Jun, T. B. Brown, P. Dhariwal,
+   S. Gray, et al. Scaling laws for autoregressive generative modeling. arXiv preprint arXiv:2010.14701,
+  2020.
+
+J. Hoffmann, S. Borgeaud, A. Mensch, E. Buchatskaya, T. Cai, E. Rutherford, D. d. L. Casas, L. A.
+   Hendricks, J. Welbl, A. Clark, et al. Training compute-optimal large language models. arXiv preprint
+   arXiv:2203.15556, 2022.
+
+S. Hu, Y. Tu, X. Han, C. He, G. Cui, X. Long, Z. Zheng, Y. Fang, Y. Huang, W. Zhao, et al. Minicpm:
+   Unveiling the potential of small language models with scalable training strategies. arXiv preprint
+   arXiv:2404.06395, 2024.
+
+A. Q. Jiang, A. Sablayrolles, A. Roux, A. Mensch, B. Savary, C. Bamford, D. S. Chaplot, D. d. l. Casas,
+  E. B. Hanna, F. Bressand, et al. Mixtral of experts. arXiv preprint arXiv:2401.04088, 2024.
+
+J. Kaplan, S. McCandlish, T. Henighan, T. B. Brown, B. Chess, R. Child, S. Gray, A. Radford, J. Wu,
+   and D. Amodei. Scaling laws for neural language models. arXiv preprint arXiv:2001.08361, 2020.
+
+D. Lee, C. Kim, S. Kim, M. Cho, and W.-S. Han. Autoregressive image generation using residual
+  quantization. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+  pages 11523–11532, 2022.
+
+J. Li, D. Li, S. Savarese, and S. Hoi. Blip-2: Bootstrapping language-image pre-training with frozen
+   image encoders and large language models. In International conference on machine learning, pages
+   19730–19742. PMLR, 2023.
+
+                                                                                                       26
+                                          OneRec Technical Report
+
+
+
+A. Liu, B. Feng, B. Xue, B. Wang, B. Wu, C. Lu, C. Zhao, C. Deng, C. Zhang, C. Ruan, et al. Deepseek-v3
+  technical report. arXiv preprint arXiv:2412.19437, 2024.
+
+X. Luo, J. Cao, T. Sun, J. Yu, R. Huang, W. Yuan, H. Lin, Y. Zheng, S. Wang, Q. Hu, et al. Qarm:
+  Quantitative alignment multi-modal recommendation at kuaishou. arXiv preprint arXiv:2411.11739,
+  2024.
+
+L. Ouyang, J. Wu, X. Jiang, D. Almeida, C. Wainwright, P. Mishkin, C. Zhang, S. Agarwal, K. Slama,
+   A. Ray, et al. Training language models to follow instructions with human feedback. Advances in
+   neural information processing systems, 35:27730–27744, 2022.
+
+Q. Pi, G. Zhou, Y. Zhang, Z. Wang, L. Ren, Y. Fan, X. Zhu, and K. Gai. Search-based user interest
+  modeling with lifelong sequential behavior data for click-through rate prediction. In Proceedings of
+  the 29th ACM International Conference on Information & Knowledge Management, pages 2685–2692,
+  2020.
+
+R. Rafailov, A. Sharma, E. Mitchell, C. D. Manning, S. Ermon, and C. Finn. Direct preference
+  optimization: Your language model is secretly a reward model. Advances in Neural Information
+  Processing Systems, 36:53728–53741, 2023.
+
+S. Rajbhandari, J. Rasley, O. Ruwase, and Y. He. Zero: Memory optimizations toward training trillion
+   parameter models. In SC20: International Conference for High Performance Computing, Networking,
+   Storage and Analysis, pages 1–16. IEEE, 2020.
+
+S. Rajput, N. Mehta, A. Singh, R. Hulikal Keshavan, T. Vu, L. Heldt, L. Hong, Y. Tay, V. Tran, J. Samost,
+   et al. Recommender systems with generative retrieval. Advances in Neural Information Processing
+   Systems, 36, 2024.
+
+Y. Ren and D. J. Sutherland. Learning dynamics of llm finetuning. arXiv preprint arXiv:2407.10490,
+   2024.
+
+S. Rendle. Factorization machines. In 2010 IEEE International conference on data mining, pages
+  995–1000. IEEE, 2010.
+
+F. Ricci, L. Rokach, and B. Shapira. Introduction to recommender systems handbook. In Recommender
+   systems handbook, pages 1–35. Springer, 2010.
+
+Z. Shao, P. Wang, Q. Zhu, R. Xu, J. Song, X. Bi, H. Zhang, M. Zhang, Y. Li, Y. Wu, et al. Deepseek-
+  math: Pushing the limits of mathematical reasoning in open language models. arXiv preprint
+  arXiv:2402.03300, 2024.
+
+N. Shazeer. Glu variants improve transformer. arXiv preprint arXiv:2002.05202, 2020.
+
+M. Shoeybi, M. Patwary, R. Puri, P. LeGresley, J. Casper, and B. Catanzaro. Megatron-lm: Training
+ multi-billion parameter language models using model parallelism. arXiv preprint arXiv:1909.08053,
+ 2019.
+
+Z. Si, L. Guan, Z. Sun, X. Zang, J. Lu, Y. Hui, X. Cao, Z. Yang, Y. Zheng, D. Leng, et al. Twin v2:
+  Scaling ultra-long user behavior sequence modeling for enhanced ctr prediction at kuaishou. In
+  Proceedings of the 33rd ACM International Conference on Information and Knowledge Management,
+  pages 4890–4897, 2024.
+
+R. Thoppilan, D. De Freitas, J. Hall, N. Shazeer, A. Kulshreshtha, H.-T. Cheng, A. Jin, T. Bos, L. Baker,
+  Y. Du, et al. Lamda: Language models for dialog applications. arXiv preprint arXiv:2201.08239,
+  2022.
+
+                                                                                                      27
+                                          OneRec Technical Report
+
+
+
+X. Wang, J. Cao, Z. Fu, K. Gai, and G. Zhou. Home: Hierarchy of multi-gate experts for multi-task
+  learning at kuaishou. arXiv preprint arXiv:2408.05430, 2024.
+
+X. Yang, Y. Zhu, Y. Zhang, X. Wang, and Q. Yuan. Large scale product graph construction for
+  recommendation in e-commerce. CoRR, abs/2010.05525, 2020.
+
+B. Zheng, Y. Hou, H. Lu, Y. Chen, W. X. Zhao, M. Chen, and J.-R. Wen. Adapting large language
+  models by integrating collaborative semantics for recommendation. In 2024 IEEE 40th International
+  Conference on Data Engineering (ICDE), pages 1435–1448. IEEE, 2024.
+
+G. Zhou, X. Zhu, C. Song, Y. Fan, H. Zhu, X. Ma, Y. Yan, J. Jin, H. Li, and K. Gai. Deep interest network
+  for click-through rate prediction. In Proceedings of the 24th ACM SIGKDD international conference
+  on knowledge discovery & data mining, pages 1059–1068, 2018.
+
+L. Zhu, F. Wei, Y. Lu, and D. Chen. Scaling the codebook size of vqgan to 100,000 with a utilization
+   rate of 99%. arXiv preprint arXiv:2406.11837, 2024.
+
+D. M. Ziegler, N. Stiennon, J. Wu, T. B. Brown, A. Radford, D. Amodei, P. Christiano, and G. Irving.
+  Fine-tuning language models from human preferences. arXiv preprint arXiv:1909.08593, 2019.
+
+
+
+
+                                                                                                      28
+                                        OneRec Technical Report
+
+
+
+Appendix
+A. Contributions
+Within each role, authors are listed alphabetically by their first name. Names marked with * denote
+individuals who have departed from our team.
+
+ Core Contributors                                   Hezheng Lin*
+Guorui Zhou                                          Hongtao Cheng
+Jiaxin Deng                                          Hongyang Cao
+Jinghao Zhang                                        Huanjie Wang
+Kuo Cai                                              Jiaming Huang
+Lejian Ren                                           Jiapeng Chen
+Qiang Luo                                            Jiaqiang Liu
+Qianqian Wang                                        Jinghui Jia
+Qigen Hu                                             Kun Gai
+Rui Huang                                            Lantao Hu
+Shiyao Wang                                          Liang Zeng
+Weifeng Ding*                                        Liao Yu
+Wuchao Li                                            Qiang Wang
+Xinchen Luo                                          Qidong Zhou
+Xingmei Wang                                         Shengzhe Wang
+Zexuan Cheng                                         Shihui He
+Zixing Zhang                                         Shuang Yang
+                                                     Shujie Yang
+ Contributors
+                                                     Sui Huang
+Bin Zhang
+                                                     Tao Wu
+Boxuan Wang
+                                                     Tiantian He
+Chaoyi Ma
+                                                     Tingting Gao
+Chengru Song
+                                                     Wei Yuan
+Chenhui Wang
+                                                     Xiao Liang
+Di Wang
+                                                     Xiaoxiao Xu
+Dongxue Meng
+                                                     Xugang Liu
+Fan Yang
+                                                     Yan Wang
+Fangyu Zhang
+                                                     Yi Wang
+Feng Jiang
+                                                     Yiwu Liu
+Fuxing Zhang
+                                                     Yue Song
+Gang Wang
+                                                     Yufei Zhang
+Guowang Zhang
+                                                     Yunfan Wu
+Han Li
+                                                     Yunfeng Zhao
+Hengrui Hu
+                                                     Zhanyu Liu
+
+
+
+
+                                                                                                 29
+                                                      OneRec Technical Report
+
+
+
+                                            Relative Improvement in LT7 metrics
+     0.08%
+                                                 OneRec                              Caching Disable
+     0.06%
+
+
+     0.04%
+
+
+     0.02%
+
+
+     0.00%
+
+
+     -0.02%
+
+
+     -0.04%
+
+
+                                                              Da
+
+                                                                   Da
+
+                                                                         Da
+
+                                                                              Da
+
+                                                                                    Da
+
+                                                                                         Da
+
+                                                                                              Da
+
+                                                                                                   Da
+
+                                                                                                        Da
+
+                                                                                                             Da
+
+                                                                                                                  Da
+
+                                                                                                                       Da
+
+                                                                                                                            Da
+              Da
+
+                   Da
+
+                        Da
+
+                             Da
+
+                                  Da
+
+                                       Da
+
+                                            Da
+
+                                                 Da
+
+                                                       Da
+
+
+                                                              y1
+
+                                                                   y1
+
+                                                                         y1
+
+                                                                              y1
+
+                                                                                    y1
+
+                                                                                         y1
+
+                                                                                              y1
+
+                                                                                                   y1
+
+                                                                                                        y1
+
+                                                                                                             y1
+
+                                                                                                                  y2
+
+                                                                                                                       y2
+
+                                                                                                                            y2
+              y1
+
+                   y2
+
+                        y3
+
+                             y4
+
+                                  y5
+
+                                       y6
+
+                                            y7
+
+                                                 y8
+
+                                                         y9
+
+
+
+
+                                                                     1
+                                                               0
+
+
+
+
+                                                                          2
+
+                                                                                3
+
+                                                                                     4
+
+                                                                                          5
+
+                                                                                               6
+
+                                                                                                    7
+
+                                                                                                         8
+
+                                                                                                              9
+
+                                                                                                                   0
+
+                                                                                                                        1
+
+                                                                                                                             2
+Figure 13 | Comparative analysis of OneRec vs. Caching Disabled Architecture on LT7 growth trends.
+
+
+B. Implementation Details of Online A/B Test
+In this section, we present the implementation details of OneRec in online A/B testing. In recom-
+mendation systems, a user’s request typically triggers various system modules to generate real-time
+recommendation results. However, in practical applications, the massive QPS (the peak QPS can
+exceed 400k) necessitates substantial resources to handle such high concurrency. To address this, our
+system incorporates a caching mechanism: for each user request, the system returns 𝑘 recommenda-
+tion results. Apart from the items actually exposed, the remaining items are stored as candidates in a
+cache pool. When the system experiences a high QPS load, cached results are retrieved for display,
+achieving a trade-off between resource usage and real-time performance. Thus, we broadly catego-
+rize QPS into real-time and degraded (cached) traffic, and OneRec’s online experiment specifically
+upgrades this degraded portion. There are two primary reasons for this experimental setup:
+   1. The previous caching mechanism significantly sacrificed the benefits of timeliness, affecting
+user experience during peak evening hours with high request volumes. While “disabling the caching
+mechanism” would incur substantial resource costs, OneRec’s highly efficient end-to-end pipeline
+and optimized MFU drastically reduce the system’s OPEX while delivering notable performance
+improvements.
+    2. OneRec represents an entirely new architecture, introducing a fresh paradigm for technical
+iteration, business optimization, and team collaboration. We use this portion of traffic as a starting
+point to continuously explore technical boundaries and team collaboration mechanisms, building a
+robust foundation for handling more traffic.
+    As mentioned in Section 4.5, our experimental group traffic is 5%, with OneRec applied to 25% of
+the degraded traffic within this group. Despite this limited scope, we observe significant performance
+gains across two scenarios, achieving 0.54% and 1.24% improvements in app stay time. For a more
+rigorous comparison, we allocate an additional 1% experimental group with caching disabled (all
+traffic requesting real-time recommendations). Even against this baseline, OneRec demonstrates
+superior performance (shown in Table 13). We also observe the LT7 metric growth patterns between
+OneRec and the caching disabled strategy. Figure 13 indicates that OneRec exhibits significantly
+stronger improvement trends.
+
+
+
+
+                                                                                                                                 30
+                                         OneRec Technical Report
+
+
+
+Table 13 | The absolute improvement of OneRec compared to the current multi-stage system and
+caching disabled experimental group (all traffic requesting real-time recommendations) in the online
+A/B testing setting.
+
+  Scenarios             Online Metrics            vs. Current System      vs. Caching Disabled
+                        App Stay Time             +0.54%                  +0.20%
+                        LT7                       +0.05%                  +0.03%
+                        Watch Time                +1.98%                  +0.75%
+                        Video View                +2.52%                  +1.79%
+                        Engagement Depth          +1.78%                  +1.30%
+  Kuaishou
+                        Like                      +2.43%                  +0.88%
+                        Follow                    +3.24%                  +1.29%
+                        Comment                   +5.27%                  +3.18%
+                        Collect                   +2.93%                  +0.73%
+                        Foward                    +5.90%                  +4.92%
+                        App Stay Time             +1.24%                  +0.55%
+                        LT7                       +0.08%                  +0.02%
+                        Watch Time                +3.28%                  +1.58%
+                        Video View                +3.39%                  +1.71%
+                        Engagement Depth          +2.89%                  +2.49%
+  Kuaishou Lite
+                        Like                      +1.49%                  -1.71%
+                        Follow                    +2.28%                  +0.89%
+                        Comment                   +3.20%                  +0.60%
+                        Collect                   +1.91%                  -1.03%
+                        Foward                    +3.48%                  +1.35%
+
+
+   Through rigorous online A/B testing, our OneRec system has successfully replaced the original
+caching mechanism and now serves 25% of the traffic in Kuaishou’s main scenarios.
+
+
+C. Case Study for Tokenization
+
+C.1. Representation Cases
+
+To assess our aligned collaborative-aware multimodal representations, we contrast them with collabo-
+rative representations from traditional RS and pure multimodal representations extracted from cap-
+tion/visual/OCR features. Figure 14, Figure 15, and Figure 16 present illustrative cases demonstrating
+video retrieval results from user history for query videos when leveraging different representations.
+
+
+
+                                                                                                   31
+                                           OneRec Technical Report
+
+
+
+
+         Query                 食品安全 / FoodSafety
+
+                        阳光玫瑰为何降价这么多？/ Why
+                        have shine muscat prices
+                        dropped?
+
+
+
+
+                       农药污染 / PesticideContamination
+
+
+
+         Collaborative                                                      挑选蔬菜 / PickVegetable
+         Behaviors with collaborative similarity to the query
+
+                        蔬菜这样买菜                           早市菠菜挑选                      ⽩萝⼘好不好
+                        好吃 / how to                      ⼤法 / Tips for               吃，主要看这
+                        pick the                         selecting                   两点 / Want
+                        freshest                         spinach at the              tasty radish?
+                        vegetables!                      morning                     Check these 2
+                                                         market                      things first!
+
+                        挑选蔬菜 /                           挑选菠菜 /                      挑选白萝卜 /
+                        PickVegetable                    PickSpinach                 PickRadish
+
+
+
+        Multimodal                                                               卖水果 / SellFruits
+
+         Behaviors with visual similarity to the query
+
+                       ⼴⻄沃柑新鲜上                           这柠檬太划算了/                    徐⾹猕猴桃好
+                       市/ Guangxi                        These lemons                甜好甜 / Xu
+                       wogan: Freshly                    are such a steal            Xiang Kiwifruit:
+                       harvested!                                                    Super Sweet!
+
+
+
+                                                                                     猕猴桃 /
+                       沃柑 / Wogan                        柠檬 / Lemon                  Kiwifruit
+
+
+
+         Aligned Collaborative-Aware Multimodal                               食品安全 / FoodSafety
+
+         Behaviors with both collaborative & visual similarity to the query
+
+                       ⽔果上市前泡药                           ⻄葫芦真的致癌                     盘点那些科技
+                       ⽔ / Fruits are                    么 / Does                    与狠活 /
+                       soaked in a                       zucchini really             Reviewing
+                       solution before                   cause cancer?               those tech
+                       being put on the                                              and skills
+                       market
+
+                       防腐剂 /                             致癌物 /                       科技与狠活 /
+                       Preservative                      Carcinogen                  TechAndSkills
+
+
+
+
+Figure 14 | Cases of top-ranked videos retrieved from user history triggered by the query using
+different representation types.
+
+
+
+
+                                                                                                        32
+                                               OneRec Technical Report
+
+
+
+
+         Query                           花艺 / FloralArt
+
+                       插花艺术 / flower arrangement art
+
+
+
+
+                      插花 / Flower Arrangement
+
+
+
+
+        Collaborative                                                              创意艺术 / CreativeArts
+
+        Behaviors with collaborative similarity to the query
+
+                       教你画超帅的古                             ⻰泉⻘瓷传统烧                          桌⾯烟⾬江南/
+                       ⻛男武将 /                              制全过程 / The                       Jiangnan in
+                       Teach you how                       entire traditional               drizzling rain on
+                       to draw a super                     firing process of                the desktop
+                       cool ancient-                       Longquan
+                       style male                          celadon.
+                       warrior
+                                                           手工 /                             鱼缸造景 /
+                      绘画 / Painting                        Handmade                         Aquascaping
+
+
+
+
+         Multimodal                                                             花卉用途 / FloralApplication
+         Behaviors with visual similarity to the query
+
+                       玫瑰鲜花液⼀定                             花图案的连⾐裙                          揭秘古⼈春天
+                       认准我们玫瑰之                             / Dress with                     吃的花膳 /
+                       乡原产地 /                              floral pattern                   Unveiling the
+                       Choose our rose                                                      flower dishes
+                       flower liquid                                                        ancient people
+                       from Rose Town                                                       ate in spring
+
+                       花卉护肤 /                              花卉连衣裙 /                          花卉料理 /
+                       FloralSkincare                      FloralDress                      FloralCuisine
+
+
+
+
+        Aligned Collaborative-Aware Multimodal                                            花艺 / FloralArt
+        Behaviors with both collaborative & visual similarity to the query
+
+                      中式插花 /                               花艺师 / florist                    朱顶红/
+                      Chinese flower                                                        Hippeastrum
+                      arrangement
+
+
+
+                      中式插花 /
+                      ChinesesFlower                       插花 / Flower                      盆栽艺术 /
+                      Arrangement                          Arrangement                      PottedPlantArt
+
+
+
+Figure 15 | Cases of top-ranked videos retrieved from user history triggered by the query using
+different representation types.
+
+
+
+
+                                                                                                                33
+                                           OneRec Technical Report
+
+
+
+
+         Query                    生活妙招 / LifeHacks
+
+                       不⽤开瓶器，就能把啤酒瓶塞拿出来 /
+                       Remove the cork without a
+                       corkscrew
+
+
+
+
+                      啤酒开瓶妙招 / BearOpeningHacks
+
+
+
+
+        Collaborative                                                              美食 / Foods
+        Behaviors with collaborative similarity to the query
+
+                        ⼀百多的⽉饼                           今晚吃⽔煮菜/                   吃播 /
+                        / 100 yuan for                   We're having              Mukbang
+                        mooncakes                        boiled
+                                                         vegetables
+                                                         tonight.
+
+
+                       月饼 /                              水煮菜 / Boiled
+                       Moocakes                          Vegetables               龙虾 / Lobster
+
+
+
+
+         Multimodal                                                                   酒 / Wine
+
+         Behaviors with visual similarity to the query
+
+                       喝中国劲酒 /                           只有⽔，糯⽶和                   五粮液⼩酒破
+                       Enjoy Chinese                     酒曲的⽶酒 /                   价/ Wuliangye
+                       Jinjiu                            Rice wine made            mini bottles
+                                                         with just water,          hit rock-
+                                                         glutinous rice,           bottom price
+                                                         and koji starter
+
+                       中国劲酒 /                                                     五粮液 /
+                       ChineseJinjiu                     米酒 / RiceWine            Wuliangye
+
+
+
+
+        Aligned Collaborative-Aware Multimodal                               生活妙招 / LifeHacks
+
+        Behaviors with both collaborative & visual similarity to the query
+
+                       这些⽅法真的好                           绳⼦这么短也能                   防困⼩妙招 /
+                       使吗？/ Do                           挂上钥匙扣 /                   Anti-sleep
+                       these methods                     Short cords can           hacks
+                       really work?                      attach to
+                                                         keychains
+
+
+                       妙招测评 /                            打结妙招 /                    防困妙招 / Anti-
+                       HacksReviews                      KnottingHacks             SleepHacks
+
+
+
+Figure 16 | Cases of top-ranked videos retrieved from user history triggered by the query using
+different representation types.
+
+
+
+
+                                                                                                  34
+                                          OneRec Technical Report
+
+
+
+    Our analysis reveals that collaborative representations—trained solely on collaborative sig-
+nals—capture co-occurrence patterns but lack semantic relevance. This results in retrieved videos
+exhibiting categorical misalignment with query videos, as exemplified by painting content retrieved
+for a floral art query in Figure 15 (row 2). Conversely, pure multimodal representations retrieve
+videos with surface-level feature similarities (e.g., shared visual elements like fruit in Figure 14 (row
+3) or wine in Figure 16 (row 3)) yet fundamental categorical discrepancies relative to query videos.
+In contrast, our representations integrate multimodal and collaborative signals, enabling the retrieval
+of videos with multifaceted relevance. This demonstrates that our representations overcome the
+limitations of unimodal ones by jointly modeling content semantics and behavioral patterns.
+
+
+C.2. Tokenization Cases
+
+We present cases of discrete item semantic identifiers generated by RQ-Kmeans in Figure 17 and
+Figure 18. Our tokenization method can produce coarse-to-fine item semantic identifiers, where the
+first codeword indicates the coarsest category, and the categories of the second and third codewords
+become increasingly finer.
+
+
+
+
+                                                                                                      35
+                                        OneRec Technical Report
+
+
+
+
+       1501, *, *, *, *                                                                         美食 / Foods
+
+                 家常菜 / home-          纯⼿⼯⾃制美⻝ /                   吃播 / Mukbang                 年夜饭第⼗四道
+                 cooked dishes        Handmade                                                 菜 / The 14th
+                                      homemade food                                            dish of the New
+                                                                                               Year's Eve
+                                                                                               dinner
+
+                                      自制面食 /                                                   虾仁豆腐 /
+                家常菜 / Home            Homemade                    羊肉吃播 /                       Shrimp and
+                CookedDished          Pasta                       LampMukbang                  Tofu
+
+                 黏黏糊糊的爆辣              番茄⽕锅底料⼝                     ⾃制流汁⼤宽粉                      我是吃货，记录⽣
+                 芝⼠⽕鸡⾯ /              感酸甜 / Tomato                / Homemade                   活的点滴 / I’m a
+                 Sticky and spicy     hot pot base has            wide noodles                 foodie
+                 cheese turkey        a sweet and                 with flowing
+                 noodles              sour taste                  sauce
+                                                                                               刀削面吃播 /
+                                                                  宽粉吃播 /                       Knife-Cut
+                 火鸡面 /                                            WideNoodles                  Noodles
+                 TurkeyNoodles        火锅 / HotPot                 Mukbang                      Mukbang
+
+
+
+
+       1501, 3656, *, *, *                                                       美食 à 吃播 / Foods à Mukbang
+
+                爆辣⾦针菇和⽩象              你们都喜欢怎么                     我是吃货，记录⽣                     好久没吃⽶饭啦，
+                ⽕鸡⾯/ the super        煮螺蛳粉呢？/                     活的点滴 / I’m a                 这么吃还真挺⾹ /
+                spicy enoki           How do you like             foodie                       I haven't had
+                mushrooms and         to cook snail                                            rice for a long
+                Baixiang turkey       noodles?                                                 time, and it
+                noodles                                                                        tastes good.
+                火鸡面吃播 /               螺蛳粉吃播 /                     馒头吃播 /
+                TurkeyNoodles         SnailNoodles                SteamedBun                   米饭吃播 /
+                Mukbang               Mukbang                     Mukbang                      RiceMukbang
+
+
+                 家常吃播 /               吃家常菜喜欢点                     把⽑肚贡菜当⾯                      湖南的特产真的
+                 Home-style           赞关注 / If you                条吃！/ Eating                  是这些吗？/ Are
+                 Mukbang              enjoy home-                 omasum and                   these really the
+                                      cooked dishes,              tribute                      specialties of
+                                      please like and             vegetables as                Hunan?
+                                      follow.                     noodles!
+                家常吃播 /                家常吃播 /                      毛肚吃播 /                       湖南特产吃播 /
+                HomeStyle             HomeStyle                   Omasum                       SpecialtiesOf
+                Mukbang               Mukbang                     Mukbang                      HunanMukbang
+
+
+
+
+       1501, 3656, 65, *, *                                美食 à 吃播 à 面条 / Foods à Mukbang à Noodles
+
+                加臭加辣柳州螺               麻酱⽶线 /                      ⼀起来嗦粉 /                      双倍腐⽵加量酸
+                蛳粉 / Liuzhou          Sesame Paste                Let‘s enjoy                  笋！/ Double
+                Luosifen with         Rice Noodles                some snail                   the dried
+                extra stink and                                   noodles together.            beancurd!
+                spice
+
+                螺蛳粉吃播 /               米线吃播 /                      螺蛳粉吃播 /                      螺蛳粉吃播 /
+                SnailNoodles          RiceNoodles                 SnailNoodles                 SnailNoodles
+                Mukbang               Mukbang                     Mukbang                      Mukbang
+
+                终于等到双⼗⼆
+                热⼲⾯活动了 /
+                The Double 12
+                Hot Dry Noodles
+                promotion is
+                here!
+                热干面吃播 /
+                HotDryNoodles
+                Mukbang
+
+
+
+Figure 17 | Cases of coarse-to-fine item semantic identifiers generated by RQ-Kmeans when 𝐿𝑡 = 5.
+
+
+
+
+                                                                                                                  36
+                                        OneRec Technical Report
+
+
+
+
+       2150, *, *, *, *                                                                   体育 / Sports
+
+                 ⽤⽓球做保龄球 /             科⽐ / Kobe                  辽宁男篮 /                  乒乓球事业 /
+                 Use balloons to                                  Liaoning Men's          table tennis
+                 make a bowling                                   Basketball Team         career
+                 game
+
+                                                                  辽宁男篮 /
+                                      篮球运动员科比 /                   LiaoningMen's
+                                      Basketball                  Basketball              乒乓球 /
+                 保龄球 / Bowling        PlayerKobe                  Team                    TableTennis
+
+                四川⼥篮对阵江苏               精彩⾜球 /                     中国短跑⼥神 /                吉达联合近5轮1
+                ⼥篮 / Sichuan           exciting football          Chinese sprint          胜3平1负 / Al-
+                Women's                                           goddess                 Ittihad has 1 win,
+                Basketball Team                                                           3 draws, and 1
+                vs. Jiangsu                                                               loss in the last 5
+                Women's                                                                   rounds
+                Basketball Team       足球运动员肥罗 /
+                女篮 / Women's          FootballPlayer                                      吉达联合足球俱
+                BasketballTeam        Ronaldo                     短跑 / Sprint             乐部 / Al-Ittihad
+
+
+
+
+       2150, 3444, *, *, *                                 体育 à 篮球& 足球 / Sports à Basketball&Football
+
+                 保罗⼀⽣之敌/              塔图姆对战灰熊 /                   ⼤巴黎球员全部                尼克斯战胜太阳 /
+                 Paul’ s lifelong     Tatum against               站着不动/ The              The Knicks
+                 rival                the Grizzlies               PSG players all        defeated the
+                                                                  stood still            Suns
+
+
+                 篮球运动员保罗 /            塔图姆篮球队 /                                           尼克斯篮球队 /
+                 Basketball           Tatum                       大巴黎足球队 /               TheKnicks
+                 PlayerPaul           BasketballTeam              ThePSG                 BasketballTeam
+
+
+                 C罗 定义伟⼤ /            希望穆迪和⼩穆                     ⾜坛⼤盘点 /                什么是NBA中的
+                 Cristiano            迪没事 / Hope                  Football roundup       哈登规则？ /
+                 Ronaldo defines      Moody and Little                                   What is the
+                 greatness            Moody are okay                                     Harden Rule in
+                                                                                         the NBA?
+                 足球运动员C罗 /
+                 FootballPlayer       篮球运动员穆迪 /                   足球盘点 /
+                 Cristiano            Basketball                  Football               NBA哈登规则 /
+                 Ronaldo              PlayerMoody                 Roundup                NBAHardenRule
+
+
+
+
+       2150, 3444, 1522, *, *            体育 à 篮球& 足球 à 篮球 / Sports à Basketball&Football à Basketball
+
+                 锡安当年被吹爆              泰斯球商⾮常⾼ /                   热⻔球员 /                 鹈鹕战胜快船 /
+                 了 / Zion was         Tice has a very             Popular player         The Pelicans
+                 hyped up back        high basketball                                    defeated the
+                                      IQ                                                 Clippers
+
+
+                 篮球运动员锡安 /                                        篮球球员 /                 鹈鹕篮球队 /
+                 Basketball           篮球智商 /                      Basketball             ThePelicans
+                 PlayerZion           BasketballIQ                Players                BasketballTeam
+
+
+                 NBA创作营 /             ⽕箭战胜掘⾦ /                    哪队能赢? /                湖⼈vs太阳 /
+                 NBA Creative         The Rockets                 Which team             The Lakers vs.
+                 Camp                 defeated the                would win?             Suns
+                                      Nuggets
+
+
+                NBA创作营 /              火箭篮球队 /                     篮球盘点 /                 湖人篮球队 /
+                NBA Creative          The Rockets                 Basketball             TheLakers
+                Camp                  BasketballTeam              Roundup                BasketballTeam
+
+
+
+
+Figure 18 | Cases of coarse-to-fine item semantic identifiers generated by RQ-Kmeans when 𝐿𝑡 = 5.
+
+
+D. Notations
+We summarize key notations used in this paper in Table 14 and Table 15.
+
+
+
+
+                                                                                                               37
+                                                      OneRec Technical Report
+
+
+
+
+Table 14 | Notation and Symbol Definitions in OneRec (Part 1)
+
+                                                     General Notation
+           𝑑model                Model hidden dimension (embedding dimension)
+              𝐿𝑡                 Number of quantization layers in tokenization (set to 3)
+              𝑁𝑡                 Codebook size for each quantization layer
+       1 , 𝑠2 , . . . , 𝑠 𝐿𝑡 }
+    { 𝑠𝑚                         Coarse-to-fine semantic identifiers for item 𝑚
+            𝑚            𝑚
+                                                    Item Tokenization
+              𝑑𝑡                 Embedding dimension in tokenization (set to 512)
+              𝑁𝑀                 The number of original multimodal token vectors of an item (set to 1280)
+               M                 Multimodal token vectors from miniCPM-V-8B, M ∈ ℝ𝑁𝑀 × 𝑑𝑡
+              𝑁 𝑀˜               The number of compressed multimodal token vectors of an item (set to 4)
+             Q (𝑖)               Query tokens in QFormer at layer 𝑖, Q ( 𝑖 ) ∈ ℝ𝑁𝑀˜ × 𝑑𝑡
+              M̃                 Compressed multimodal representation after QFormer, M̃ ∈ ℝ𝑁𝑀˜ × 𝑑𝑡
+               𝑁𝑐                Number of QFormer layers (set to 4)
+             R (𝑙)               Residual vectors at quantization layer 𝑙
+             C (𝑙)               Codebook (K-means centroids) at quantization layer 𝑙
+                (𝑙)
+              𝒄𝑘                 𝑘-th centroid in the codebook at layer 𝑙
+               𝑠𝑖𝑙               Semantic identifier for item 𝑖 at quantization layer 𝑙
+            D 𝑝𝑎𝑖𝑟               Dataset of item pairs with high collaborative similarity
+               𝜏                 Temperature coefficient for item-to-item loss
+          sim(·, ·)              Similarity function used in item-to-item contrastive loss
+             B                   A batch of D 𝑝𝑎𝑖𝑟
+               𝑡𝑘                The 𝑘-th caption token
+                                             Multi-Scale Feature Engineering
+               𝐿𝑠                Length of short-term behavior sequence (set to 20)
+               𝐿𝑝                Length of positive-feedback behavior sequence (set to 256)
+               𝐿𝑙                Length of lifelong behavior sequence (set to 2000)
+               f𝑢                Concatenated user static features before dense transformation
+               f𝑠                Concatenated short-term behavior features before dense transformation
+               f𝑝                Concatenated positive-feedback behavior features before dense transfor-
+                                 mation
+              f𝑙                 Concatenated lifelong behavior features before dense transformation
+             e*                  Individual feature embeddings (e.g., euid , egender , eage for user static)
+             e*𝑠                 Feature embeddings in the short-term pathway (e.g., evid    𝑠
+                                                                                                , eaid
+                                                                                                   𝑠
+                                                                                                       , etag
+                                                                                                          𝑠
+                                                                                                              , etc.)
+             e*𝑝                 Feature embeddings in the positive-feedback pathway
+             e*𝑙                 Feature embeddings in the lifelong pathway
+             h𝑢                  User static pathway representation, h𝑢 ∈ ℝ1× 𝑑model
+              h𝑠                 Short-term pathway representation, h𝑠 ∈ ℝ𝐿𝑠 × 𝑑model
+             h𝑝                  Positive-feedback pathway representation, h 𝑝 ∈ ℝ𝐿 𝑝 × 𝑑model
+              v𝑙                 Processed lifelong features before QFormer compression, v𝑙 ∈ ℝ𝐿𝑙 × 𝑑model
+             h𝑙( 𝑖 )             Query vectors at QFormer layer 𝑖 in the lifelong pathway
+              h𝑙                 Final lifelong pathway representation, h𝑙 ∈ ℝ𝑁𝑞 × 𝑑model
+               𝑁𝑞                Number of query tokens in lifelong pathway compression (set to 128)
+               𝑁𝑙                Number of QFormer blocks in lifelong pathway (set to 2)
+               𝑀                 Threshold for hierarchical clustering termination
+
+
+
+
+                                                                                                                        38
+                                          OneRec Technical Report
+
+
+
+
+Table 15 | Notation and Symbol Definitions in OneRec (Part 2)
+
+                                    Encoder-Decoder Architecture
+          𝐿enc       Number of transformer encoder layers
+          𝐿dec       Number of transformer decoder layers
+          epos       Positional embeddings, epos ∈ ℝ (1+𝐿𝑠 +𝐿 𝑝 +𝑁𝑞 ) × 𝑑model
+          z (𝑖)      Hidden states at encoder layer 𝑖
+          zenc       Final encoder output
+          d𝑚( 𝑖 )    Decoder hidden states for item 𝑚 at layer 𝑖
+          S𝑚                                                 1 , 𝑠2 , · · · , 𝑠 𝐿𝑡 }
+                     Input sequence for item 𝑚: { 𝑠 [BOS] , 𝑠𝑚    𝑚            𝑚
+        𝑠 [BOS]      Beginning-of-sequence token
+        𝑁experts     Number of expert networks in MoE layers
+            𝑘        Top-𝑘 routing strategy parameter in MoE
+       Gate 𝑗 (x)    Gating weights for 𝑗-th expert in MoE layer
+      Expert 𝑗 (x)   Output of 𝑗-th expert network in MoE layer
+                         Preference Alignment & Reinforcement Learning
+          𝜋𝜃         Policy model with parameters 𝜃
+         𝜋𝜃𝑜𝑙𝑑       Old policy model (before update)
+         𝜋𝜃′         Modified old policy with early clipping
+            𝑜𝑙𝑑
+          𝐺          Number of generated samples per user
+           𝐾         Number of samples selected for format reward
+          𝑟𝑖         Reward for generated item 𝑖 (P-Score)
+          𝐴𝑖         Advantage for generated item 𝑖
+           𝜖         Clipping parameter in ECPO
+           𝛿         Early clipping parameter in ECPO (𝛿 > 0)
+       J𝐸𝐶𝑃𝑂 ( 𝜃)    ECPO optimization objective
+         sg(·)       Stop gradient operation
+                                        Industrial Constraints
+         𝐼legal      Set of legal (valid) generated items
+         𝐼viral      Set of viral content items
+            𝑓        Optimal proportion threshold for viral content
+           𝛼         Down-weighting factor for viral content reward (0 < 𝛼 < 1)
+
+
+
+
+                                                                                       39
+
