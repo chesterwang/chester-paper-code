@@ -9,16 +9,7 @@ def test_decoder():
     print("Testing OneRec Decoder implementation...")
     
     # Initialize decoder
-    decoder = OneRecDecoder(
-        vocab_size=256,
-        num_rq_layers=3,
-        model_dim=512,
-        num_decoder_layers=2,  # Use fewer layers for faster testing
-        num_heads=8,
-        ff_dim=2048,
-        num_experts=4,  # Use fewer experts for faster testing
-        top_k=2
-    )
+    decoder = OneRecDecoder()
     
     # Create dummy encoder output
     batch_size = 2

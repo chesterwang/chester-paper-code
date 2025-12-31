@@ -10,146 +10,47 @@ from .tokenizer import OneRecTokenizer
 from .encoder import OneRecEncoder
 from .decoder import OneRecDecoder
 from .reward_system import OneRecRewardSystem
-from .config import config
+from .config import OneRecConfig
 
 
 class OneRec(nn.Module):
     """
     Complete OneRec model architecture combining tokenizer, encoder, decoder, and reward system
     """
-    def __init__(self,
-                 # Tokenizer parameters
-                 num_query_tokens: int = None,
-                 num_qformer_layers: int = None,
-                 num_rq_layers: int = None,
-                 codebook_size: int = None,
-                 multimodal_hidden_dim: int = None,
-                 qformer_hidden_dim: int = None,
-
-                 # Encoder parameters
-                 encoder_model_dim: int = None,
-                 num_encoder_layers: int = None,
-                 max_seq_len: int = None,
-                 encoder_num_heads: int = None,
-                 encoder_ff_dim: int = None,
-
-                 uid_vocab_size=None,
-                 vid_vocab_size=None,
-                 aid_vocab_size=None,
-                 vid_dim: int = None,
-                 aid_dim: int = None,
-                 tag_dim: int = None,
-                 ts_dim: int = None,
-                 playtime_dim: int = None,
-                 dur_dim: int = None,
-                 label_dim: int = None,
-
-                 # Decoder parameters
-                 decoder_model_dim: int = None,
-                 num_decoder_layers: int = None,
-                 decoder_num_heads: int = None,
-                 decoder_ff_dim: int = None,
-                 num_experts: int = None,
-                 top_k: int = None,
-
-                 # Reward system parameters
-                 user_dim: int = None,
-                 item_dim: int = None,
-                 num_objectives: int = None,
-                 num_industrial_objectives: int = None):
+    def __init__(self):
         
         super().__init__()
 
-        # Use config values with fallbacks to maintain backward compatibility
-        num_query_tokens = num_query_tokens or config.num_query_tokens
-        num_qformer_layers = num_qformer_layers or config.num_qformer_layers
-        num_rq_layers = num_rq_layers or config.num_rq_layers
-        codebook_size = codebook_size or config.codebook_size
-        multimodal_hidden_dim = multimodal_hidden_dim or config.multimodal_hidden_dim
-        qformer_hidden_dim = qformer_hidden_dim or config.qformer_hidden_dim
-        encoder_model_dim = encoder_model_dim or config.encoder_model_dim
-        num_encoder_layers = num_encoder_layers or config.num_encoder_layers
-        max_seq_len = max_seq_len or config.max_seq_len
-        encoder_num_heads = encoder_num_heads or config.encoder_num_heads
-        encoder_ff_dim = encoder_ff_dim or config.encoder_ff_dim
-        uid_vocab_size = uid_vocab_size or config.uid_vocab_size
-        vid_vocab_size = vid_vocab_size or config.vid_vocab_size
-        aid_vocab_size = aid_vocab_size or config.aid_vocab_size
-        vid_dim = vid_dim or config.vid_dim
-        aid_dim = aid_dim or config.aid_dim
-        tag_dim = tag_dim or config.tag_dim
-        ts_dim = ts_dim or config.ts_dim
-        playtime_dim = playtime_dim or config.playtime_dim
-        dur_dim = dur_dim or config.dur_dim
-        label_dim = label_dim or config.label_dim
-        decoder_model_dim = decoder_model_dim or config.decoder_model_dim
-        num_decoder_layers = num_decoder_layers or config.num_decoder_layers
-        decoder_num_heads = decoder_num_heads or config.decoder_num_heads
-        decoder_ff_dim = decoder_ff_dim or config.decoder_ff_dim
-        num_experts = num_experts or config.num_experts
-        top_k = top_k or config.top_k
-        user_dim = user_dim or config.user_dim
-        item_dim = item_dim or config.item_dim
-        num_objectives = num_objectives or config.num_objectives
-        num_industrial_objectives = num_industrial_objectives or config.num_industrial_objectives
+        # Get singleton config instance
+        config = OneRecConfig.get_instance()
 
         # Initialize tokenizer
         self.tokenizer = OneRecTokenizer(
-            num_query_tokens=num_query_tokens,
-            num_qformer_layers=num_qformer_layers,
-            num_rq_layers=num_rq_layers,
-            codebook_size=codebook_size,
-            multimodal_hidden_dim=multimodal_hidden_dim,
-            qformer_hidden_dim=qformer_hidden_dim
         )
 
         # Initialize encoder
         self.encoder = OneRecEncoder(
-            model_dim=encoder_model_dim,
-            num_encoder_layers=num_encoder_layers,
-            max_seq_len=max_seq_len,
-            num_heads=encoder_num_heads,
-            ff_dim=encoder_ff_dim,
-
-            uid_vocab_size=uid_vocab_size,
-            vid_vocab_size=vid_vocab_size,
-            aid_vocab_size=aid_vocab_size,
-            vid_dim = vid_dim,
-            aid_dim = aid_dim,
-            tag_dim = tag_dim,
-            ts_dim = ts_dim,
-            playtime_dim = playtime_dim,
-            dur_dim = dur_dim,
-            label_dim = label_dim,
         )
 
         # Initialize decoder
         self.decoder = OneRecDecoder(
-            vocab_size=codebook_size,
-            num_rq_layers=num_rq_layers,
-            model_dim=decoder_model_dim,
-            num_decoder_layers=num_decoder_layers,
-            num_heads=decoder_num_heads,
-            ff_dim=decoder_ff_dim,
-            num_experts=num_experts,
-            top_k=top_k
         )
 
         # Initialize reward system
         self.reward_system = OneRecRewardSystem(
-            user_dim=user_dim,
-            item_dim=item_dim,
-            vocab_size=codebook_size,
-            num_rq_layers=num_rq_layers,
-            num_objectives=num_objectives,
-            num_industrial_objectives=num_industrial_objectives
+            # user_dim=config.user_dim,
+            # item_dim=config.item_dim,
+            # vocab_size=config.codebook_size,
+            # num_rq_layers=config.num_rq_layers,
+            # num_objectives=config.num_objectives,
+            # num_industrial_objectives=config.num_industrial_objectives
         )
         
         # Cross-attention compatibility: ensure encoder and decoder have same model dim
-        assert encoder_model_dim == decoder_model_dim, \
-            f"Encoder model dim ({encoder_model_dim}) must match decoder model dim ({decoder_model_dim})"
+        assert config.encoder_model_dim == config.decoder_model_dim, \
+            f"Encoder model dim ({config.encoder_model_dim}) must match decoder model dim ({config.decoder_model_dim})"
         
-        self.model_dim = encoder_model_dim
+        self.model_dim = config.encoder_model_dim
         
         # Loss function for next token prediction
         self.nll_loss = nn.CrossEntropyLoss(ignore_index=-100)
@@ -239,11 +140,11 @@ class OneRec(nn.Module):
         # Generate item representation from target semantic IDs
         # Use the average of semantic ID embeddings
         item_repr = torch.zeros_like(user_repr)  # [batch_size, model_dim]
-        for layer_idx in range(self.decoder.num_rq_layers):
+        for layer_idx in range(OneRecConfig.get_instance().num_rq_layers):
             layer_ids = target_semantic_ids[:, layer_idx]  # [batch_size]
             layer_emb = self.decoder.semantic_id_embeddings[layer_idx](layer_ids)  # [batch_size, model_dim]
             item_repr = item_repr + layer_emb
-        item_repr = item_repr / self.decoder.num_rq_layers  # Average across layers
+        item_repr = item_repr / OneRecConfig.get_instance().num_rq_layers  # Average across layers
 
         # Compute total reward
         total_reward, reward_components = self.reward_system.compute_total_reward(
@@ -312,7 +213,7 @@ class OneRec(nn.Module):
         )
         
         # Generate semantic IDs
-        generated_ids = self.decoder.generate(encoder_output, max_length=self.decoder.num_rq_layers)
+        generated_ids = self.decoder.generate(encoder_output, max_length=OneRecConfig.get_instance().num_rq_layers)
         
         return generated_ids
 

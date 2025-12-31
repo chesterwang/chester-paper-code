@@ -9,7 +9,7 @@ import os
 from tqdm import tqdm
 import numpy as np
 from .model import OneRec
-from .config import config
+from .config import OneRecConfig
 
 
 class OneRecDataset(Dataset):

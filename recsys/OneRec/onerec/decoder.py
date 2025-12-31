@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Optional, Tuple
 import math
-from .config import config
+from .config import OneRecConfig
 
 
 class CausalSelfAttention(nn.Module):
@@ -219,51 +219,54 @@ class OneRecDecoder(nn.Module):
     OneRec decoder for generating semantic IDs
     """
     def __init__(self,
-                 vocab_size: int = None,  # Size of codebook
-                 num_rq_layers: int = None,  # Number of RQ layers
-                 model_dim: int = None,
-                 num_decoder_layers: int = None,
-                 num_heads: int = None,
-                 ff_dim: int = None,
-                 num_experts: int = None,
-                 top_k: int = None):
+                #  vocab_size: int = None,  # Size of codebook
+                #  num_rq_layers: int = None,  # Number of RQ layers
+                #  model_dim: int = None,
+                #  num_decoder_layers: int = None,
+                #  num_heads: int = None,
+                #  ff_dim: int = None,
+                #  num_experts: int = None,
+                #  top_k: int = None
+                 ):
         super().__init__()
 
-        # Use config values with fallbacks to maintain backward compatibility
-        vocab_size = vocab_size or config.codebook_size
-        num_rq_layers = num_rq_layers or config.num_rq_layers
-        model_dim = model_dim or config.decoder_model_dim
-        num_decoder_layers = num_decoder_layers or config.num_decoder_layers
-        num_heads = num_heads or config.decoder_num_heads
-        ff_dim = ff_dim or config.decoder_ff_dim
-        num_experts = num_experts or config.num_experts
-        top_k = top_k or config.top_k
+        # Get config values
+        config = OneRecConfig.get_instance()
+        
+        # Use provided values or config defaults
+        # vocab_size = vocab_size or config.codebook_size
+        # num_rq_layers = num_rq_layers or config.num_rq_layers
+        # model_dim = model_dim or config.decoder_model_dim
+        # num_decoder_layers = num_decoder_layers or config.num_decoder_layers
+        # num_heads = num_heads or config.decoder_num_heads
+        # ff_dim = ff_dim or config.decoder_ff_dim
+        # num_experts = num_experts or config.num_experts
+        # top_k = top_k or config.top_k
 
-        self.vocab_size = vocab_size
-        self.num_rq_layers = num_rq_layers
-        self.model_dim = model_dim
+        # self.vocab_size = vocab_size
+        # self.num_rq_layers = num_rq_layers
+        # self.model_dim = model_dim
 
         # Embedding for semantic IDs (for each RQ layer)
         self.semantic_id_embeddings = nn.ModuleList([
-            nn.Embedding(vocab_size, model_dim) for _ in range(num_rq_layers)
+            nn.Embedding(config.codebook_size, config.decoder_model_dim) for _ in range(config.num_rq_layers)
         ])
 
         # Beginning of sequence token embedding
-        self.bos_embedding = nn.Embedding(1, model_dim)
-
+        self.bos_embedding = nn.Embedding(1, config.decoder_model_dim)
         # Transformer decoder layers
         self.decoder_layers = nn.ModuleList([
-            TransformerDecoderLayer(model_dim, num_heads, ff_dim, num_experts, top_k)
-            for _ in range(num_decoder_layers)
+            TransformerDecoderLayer(config.decoder_model_dim, config.decoder_num_heads, config.decoder_ff_dim, config.num_experts, config.top_k)
+            for _ in range(config.num_decoder_layers)
         ])
 
         # Output projection for each RQ layer
         self.output_projections = nn.ModuleList([
-            nn.Linear(model_dim, vocab_size) for _ in range(num_rq_layers)
+            nn.Linear(config.decoder_model_dim, config.codebook_size) for _ in range(config.num_rq_layers)
         ])
 
         # Final layer norm
-        self.layer_norm = nn.LayerNorm(model_dim)
+        self.layer_norm = nn.LayerNorm(config.decoder_model_dim)
     
     def forward(self, 
                 semantic_ids: torch.Tensor, 
@@ -286,7 +289,7 @@ class OneRecDecoder(nn.Module):
         embedded_layers.append(bos_emb)
         
         # Add embeddings for each RQ layer
-        for layer_idx in range(self.num_rq_layers):
+        for layer_idx in range(OneRecConfig.get_instance().num_rq_layers):
             layer_ids = semantic_ids[:, layer_idx:layer_idx+1]  # [batch_size, 1]
             layer_emb = self.semantic_id_embeddings[layer_idx](layer_ids)  # [batch_size, 1, model_dim]
             embedded_layers.append(layer_emb)
@@ -305,15 +308,15 @@ class OneRecDecoder(nn.Module):
         # Generate logits for next token prediction
         # We predict the next token for each position
         logits_layers = []
-        for layer_idx in range(self.num_rq_layers):
+        for layer_idx in range(OneRecConfig.get_instance().num_rq_layers):
             # Use the representation at the position of the current semantic ID
             # to predict the next one (shifted by 1 due to BOS)
             layer_repr = d_m_out[:, layer_idx:layer_idx+1, :]  # [batch_size, 1, model_dim]
-            layer_logits = self.output_projections[layer_idx](layer_repr)  # [batch_size, 1, vocab_size]
+            layer_logits = self.output_projections[layer_idx](layer_repr)  # [batch_size, 1, codebook_size]
             logits_layers.append(layer_logits)
         
         # Concatenate logits for all layers
-        logits = torch.cat(logits_layers, dim=1)  # [batch_size, num_rq_layers, vocab_size]
+        logits = torch.cat(logits_layers, dim=1)  # [batch_size, num_rq_layers, codebook_size]
         
         return logits
     
@@ -331,7 +334,7 @@ class OneRecDecoder(nn.Module):
             Generated semantic IDs [batch_size, num_rq_layers]
         """
         if max_length is None:
-            max_length = self.num_rq_layers
+            max_length = OneRecConfig.get_instance().num_rq_layers
             
         batch_size = encoder_output.size(0)
         

@@ -4,15 +4,24 @@ import torch.nn.functional as F
 from typing import List, Tuple, Optional
 import numpy as np
 from sklearn.cluster import KMeans
-from .config import config
+from .config import OneRecConfig
 
 
 class QFormer(nn.Module):
     """
     Querying Transformer (QFormer) module for compressing multimodal tokens
     """
-    def __init__(self, num_query_tokens: int = 4, num_layers: int = 4, hidden_dim: int = 512):
+    def __init__(self, num_query_tokens: int = None, num_layers: int = None, hidden_dim: int = None):
         super().__init__()
+        
+        # Get config values
+        config = OneRecConfig.get_instance()
+        
+        # Use provided values or config defaults
+        num_query_tokens = num_query_tokens or config.num_query_tokens
+        num_layers = num_layers or config.num_qformer_layers
+        hidden_dim = hidden_dim or config.qformer_hidden_dim
+        
         self.num_query_tokens = num_query_tokens
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
@@ -119,22 +128,17 @@ class OneRecTokenizer(nn.Module):
     """
     Complete tokenizer for OneRec system
     """
-    def __init__(self,
-                 num_query_tokens: int = None,
-                 num_qformer_layers: int = None,
-                 num_rq_layers: int = None,
-                 codebook_size: int = None,
-                 multimodal_hidden_dim: int = None,
-                 qformer_hidden_dim: int = None):
+    def __init__(self):
         super().__init__()
+        config = OneRecConfig.get_instance()
 
         # Use config values with fallbacks to maintain backward compatibility
-        num_query_tokens = num_query_tokens or config.num_query_tokens
-        num_qformer_layers = num_qformer_layers or config.num_qformer_layers
-        num_rq_layers = num_rq_layers or config.num_rq_layers
-        codebook_size = codebook_size or config.codebook_size
-        multimodal_hidden_dim = multimodal_hidden_dim or config.multimodal_hidden_dim
-        qformer_hidden_dim = qformer_hidden_dim or config.qformer_hidden_dim
+        num_query_tokens:int = config.num_query_tokens
+        num_qformer_layers:int = config.num_qformer_layers
+        num_rq_layers:int = config.num_rq_layers
+        codebook_size:int = config.codebook_size
+        multimodal_hidden_dim:int = config.multimodal_hidden_dim
+        qformer_hidden_dim:int = config.qformer_hidden_dim
 
         # QFormer for multimodal token compression
         self.qformer = QFormer(
@@ -147,7 +151,7 @@ class OneRecTokenizer(nn.Module):
         self.rq_kmeans = RQKmeansTokenizer(
             num_layers=num_rq_layers,
             codebook_size=codebook_size,
-            hidden_dim=qformer_hidden_dim
+            hidden_dim=multimodal_hidden_dim
         )
 
         # Projection layer to map multimodal features to QFormer dimension

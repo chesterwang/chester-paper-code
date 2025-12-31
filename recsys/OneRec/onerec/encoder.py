@@ -3,31 +3,29 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Optional, Tuple
 import math
-from .config import config
+from .config import OneRecConfig
 
 
 class UserStaticPathway(nn.Module):
     """
     User static pathway: processes user static features like uid, age, gender
     """
-    def __init__(self, 
-                 uid_vocab_size: int = 1000000,
-                 uid_dim: int = 64,
-                 gender_dim: int = 64, 
-                 age_dim: int = 64,
-                 model_dim: int = 512):
+    def __init__(self ):
         super().__init__()
         
-        self.uid_embedding = nn.Embedding(uid_vocab_size, uid_dim)  # Assuming 1M unique users
-        self.gender_embedding = nn.Embedding(3, gender_dim)  # 0: unknown, 1: male, 2: female
-        self.age_embedding = nn.Embedding(100, age_dim)  # 0-99 age range
+        # Get config values
+        config = OneRecConfig.get_instance()
+        
+        self.uid_embedding = nn.Embedding(config.uid_vocab_size, config.user_dim)  # Assuming 1M unique users
+        self.gender_embedding = nn.Embedding(3, config.gender_dim)  # 0: unknown, 1: male, 2: female
+        self.age_embedding = nn.Embedding(100, config.age_dim)  # 0-99 age range
         
         # Combine all static features
-        total_static_dim = uid_dim + gender_dim + age_dim
+        total_static_dim = config.user_dim + config.gender_dim + config.age_dim
         self.projection = nn.Sequential(
-            nn.Linear(total_static_dim, model_dim),
+            nn.Linear(total_static_dim, config.encoder_model_dim),
             nn.LeakyReLU(),
-            nn.Linear(model_dim, model_dim)
+            nn.Linear(config.encoder_model_dim, config.encoder_model_dim)
         )
     
     def forward(self, user_features: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -54,41 +52,27 @@ class ShortTermPathway(nn.Module):
     """
     Short-term behavior pathway: processes recent user interactions (L_s = 20)
     """
-    def __init__(self, 
-
-                 uid_vocab_size=1000000,  
-                 vid_vocab_size=1000000,
-                 aid_vocab_size=1000000,
-
-                 vid_dim: int = 512,
-                 aid_dim: int = 512,
-                 tag_dim: int = 128,
-                 ts_dim: int = 128,
-                 playtime_dim: int = 128,
-                 dur_dim: int = 128,
-                 label_dim: int = 128,
-                 seq_len: int = 20,
-                 model_dim: int = 512):
+    def __init__(self ):
         super().__init__()
         
-        self.seq_len = seq_len
-        self.model_dim = model_dim
+        config = OneRecConfig.get_instance()
         
         # Embedding layers
-        self.vid_embedding = nn.Embedding(vid_vocab_size, vid_dim)  # Assuming 10M unique videos
-        self.aid_embedding = nn.Embedding(aid_vocab_size, aid_dim)   # Assuming 5M unique authors
-        self.tag_embedding = nn.Linear(100, tag_dim)  # Assuming 100-dimensional tag features
-        self.ts_embedding = nn.Linear(1, ts_dim)       # Timestamp embedding
-        self.playtime_embedding = nn.Linear(1, playtime_dim)
-        self.dur_embedding = nn.Linear(1, dur_dim)
-        self.label_embedding = nn.Linear(10, label_dim)  # Assuming 10 different labels/interactions
+        self.vid_embedding = nn.Embedding(config.vid_vocab_size, config.vid_dim)  # Assuming 10M unique videos
+        self.aid_embedding = nn.Embedding(config.aid_vocab_size, config.aid_dim)   # Assuming 5M unique authors
+        self.tag_embedding = nn.Linear(100, config.tag_dim)  # Assuming 100-dimensional tag features
+        self.ts_embedding = nn.Linear(1, config.ts_dim)       # Timestamp embedding
+        self.playtime_embedding = nn.Linear(1, config.playtime_dim)
+        self.dur_embedding = nn.Linear(1, config.dur_dim)
+        self.label_embedding = nn.Linear(10, config.label_dim)  # Assuming 10 different labels/interactions
         
         # Projection to model dimension
-        total_dim = vid_dim + aid_dim + tag_dim + ts_dim + playtime_dim + dur_dim + label_dim
+        total_dim = config.vid_dim + config.aid_dim + config.tag_dim + \
+            config.ts_dim + config.playtime_dim + config.dur_dim + config.label_dim
         self.projection = nn.Sequential(
-            nn.Linear(total_dim, model_dim),
+            nn.Linear(total_dim, config.encoder_model_dim),
             nn.LeakyReLU(),
-            nn.Linear(model_dim, model_dim)
+            nn.Linear(config.encoder_model_dim, config.encoder_model_dim)
         )
     
     def forward(self, short_term_features: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -110,10 +94,7 @@ class ShortTermPathway(nn.Module):
         label_emb = self.label_embedding(short_term_features['label'])
         
         # Concatenate all features
-        combined = torch.cat([
-            vid_emb, aid_emb, tag_emb, ts_emb, 
-            playtime_emb, dur_emb, label_emb
-        ], dim=-1)
+        combined = torch.cat([ vid_emb, aid_emb, tag_emb, ts_emb, playtime_emb, dur_emb, label_emb ], dim=-1)
         
         # Project to model dimension
         h_s = self.projection(combined)
@@ -125,40 +106,27 @@ class PositiveFeedbackPathway(nn.Module):
     """
     Positive-feedback behavior pathway: processes high-engagement interactions (L_p = 256)
     """
-    def __init__(self, 
-                 uid_vocab_size=512,  
-                 vid_vocab_size=512,
-                 aid_vocab_size=512,
-
-                 vid_dim: int = 512,
-                 aid_dim: int = 512,
-                 tag_dim: int = 128,
-                 ts_dim: int = 128,
-                 playtime_dim: int = 128,
-                 dur_dim: int = 128,
-                 label_dim: int = 128,
-                 seq_len: int = 256,
-                 model_dim: int = 512):
+    def __init__(self ):
         super().__init__()
         
-        self.seq_len = seq_len
-        self.model_dim = model_dim
+        # Get config values
+        config = OneRecConfig.get_instance()
         
         # Embedding layers (same as short-term but for longer sequences)
-        self.vid_embedding = nn.Embedding(vid_vocab_size, vid_dim)
-        self.aid_embedding = nn.Embedding(aid_vocab_size, aid_dim)
-        self.tag_embedding = nn.Linear(100, tag_dim)
-        self.ts_embedding = nn.Linear(1, ts_dim)
-        self.playtime_embedding = nn.Linear(1, playtime_dim)
-        self.dur_embedding = nn.Linear(1, dur_dim)
-        self.label_embedding = nn.Linear(10, label_dim)
+        self.vid_embedding = nn.Embedding(config.vid_vocab_size, config.vid_dim)
+        self.aid_embedding = nn.Embedding(config.aid_vocab_size, config.aid_dim)
+        self.tag_embedding = nn.Linear(100, config.tag_dim)
+        self.ts_embedding = nn.Linear(1, config.ts_dim)
+        self.playtime_embedding = nn.Linear(1, config.playtime_dim)
+        self.dur_embedding = nn.Linear(1, config.dur_dim)
+        self.label_embedding = nn.Linear(10, config.label_dim)
         
         # Projection to model dimension
-        total_dim = vid_dim + aid_dim + tag_dim + ts_dim + playtime_dim + dur_dim + label_dim
+        total_dim = config.vid_dim + config.aid_dim + config.tag_dim + config.ts_dim + config.playtime_dim + config.dur_dim + config.label_dim
         self.projection = nn.Sequential(
-            nn.Linear(total_dim, model_dim),
+            nn.Linear(total_dim, config.encoder_model_dim),
             nn.LeakyReLU(),
-            nn.Linear(model_dim, model_dim)
+            nn.Linear(config.encoder_model_dim, config.encoder_model_dim)
         )
     
     def forward(self, pos_feedback_features: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -194,51 +162,32 @@ class LifelongPathway(nn.Module):
     Lifelong behavior pathway: processes ultra-long user interaction histories
     Uses hierarchical compression with QFormer
     """
-    def __init__(self, 
-                 uid_vocab_size=512,  
-                 vid_vocab_size=512,
-                 aid_vocab_size=512,
-
-                 vid_dim: int = 512,
-                 aid_dim: int = 512,
-                 tag_dim: int = 128,
-                 ts_dim: int = 128,
-                 playtime_dim: int = 128,
-                 dur_dim: int = 128,
-                 label_dim: int = 128,
-                 seq_len: int = 2000,  # Compressed sequence length
-                 num_query_tokens: int = 128,  # Number of QFormer query tokens
-                 num_layers: int = 2,
-                 model_dim: int = 512):
+    def __init__(self):
         super().__init__()
         
-        self.seq_len = seq_len
-        self.num_query_tokens = num_query_tokens
-        self.num_layers = num_layers
-        self.model_dim = model_dim
-        
+        config = OneRecConfig.get_instance()
         # Embedding layers
-        self.vid_embedding = nn.Embedding(uid_vocab_size, vid_dim)
-        self.aid_embedding = nn.Embedding(aid_vocab_size, aid_dim)
-        self.tag_embedding = nn.Linear(100, tag_dim)
-        self.ts_embedding = nn.Linear(1, ts_dim)
-        self.playtime_embedding = nn.Linear(1, playtime_dim)
-        self.dur_embedding = nn.Linear(1, dur_dim)
-        self.label_embedding = nn.Linear(10, label_dim)
+        self.vid_embedding = nn.Embedding(config.uid_vocab_size, config.vid_dim)
+        self.aid_embedding = nn.Embedding(config.aid_vocab_size, config.aid_dim)
+        self.tag_embedding = nn.Linear(100, config.tag_dim)
+        self.ts_embedding = nn.Linear(1, config.ts_dim)
+        self.playtime_embedding = nn.Linear(1, config.playtime_dim)
+        self.dur_embedding = nn.Linear(1, config.dur_dim)
+        self.label_embedding = nn.Linear(10, config.label_dim)
         
         # Projection to model dimension
-        total_dim = vid_dim + aid_dim + tag_dim + ts_dim + playtime_dim + dur_dim + label_dim
+        total_dim = config.vid_dim + config.aid_dim + config.tag_dim + config.ts_dim + config.playtime_dim + config.dur_dim + config.label_dim
         self.projection = nn.Sequential(
-            nn.Linear(total_dim, model_dim),
+            nn.Linear(total_dim, config.encoder_model_dim),
             nn.LeakyReLU(),
-            nn.Linear(model_dim, model_dim)
+            nn.Linear(config.encoder_model_dim, config.encoder_model_dim)
         )
         
         # QFormer for compression
         self.qformer = QFormer(
-            num_query_tokens=num_query_tokens,
-            num_layers=num_layers,
-            hidden_dim=model_dim
+            num_query_tokens=config.num_query_tokens,
+            num_layers=config.num_encoder_layers,
+            hidden_dim=config.encoder_model_dim
         )
     
     def forward(self, lifelong_features: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -336,17 +285,20 @@ class TransformerEncoderLayer(nn.Module):
     """
     Transformer encoder layer with self-attention and feed-forward network
     """
-    def __init__(self, model_dim: int = 512, num_heads: int = 8, ff_dim: int = 2048):
+    def __init__(self):
         super().__init__()
-        self.self_attn = nn.MultiheadAttention(embed_dim=model_dim, num_heads=num_heads)
+
+        config = OneRecConfig.get_instance()
+
+        self.self_attn = nn.MultiheadAttention(embed_dim=config.encoder_model_dim, num_heads=config.encoder_num_heads)
         self.ffn = nn.Sequential(
-            nn.Linear(model_dim, ff_dim),
+            nn.Linear(config.encoder_model_dim, config.encoder_ff_dim),
             nn.GELU(),
-            nn.Linear(ff_dim, model_dim)
+            nn.Linear(config.encoder_ff_dim, config.encoder_model_dim)
         )
-        self.norm1 = nn.LayerNorm(model_dim)
-        self.norm2 = nn.LayerNorm(model_dim)
-    
+        self.norm1 = nn.LayerNorm(config.encoder_model_dim)
+        self.norm2 = nn.LayerNorm(config.encoder_model_dim)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Self-attention
         attn_output, _ = self.self_attn(x, x, x)
@@ -365,99 +317,34 @@ class OneRecEncoder(nn.Module):
     """
     Complete OneRec encoder with multi-scale feature engineering
     """
-    def __init__(self,
-                 model_dim: int = None,
-                 num_encoder_layers: int = None,
-                 max_seq_len: int = None,  # 1 (user static) + 20 (short-term) + 256 (pos-feedback) + 128 (lifelong)
-                 num_heads: int = None,
-                 ff_dim: int = None,
-
-                 uid_vocab_size=None,
-                 vid_vocab_size=None,
-                 aid_vocab_size=None,
-                 vid_dim: int = None,
-                 aid_dim: int = None,
-                 tag_dim: int = None,
-                 ts_dim: int = None,
-                 playtime_dim: int = None,
-                 dur_dim: int = None,
-                 label_dim: int = None,
-                 ):
+    def __init__(self):
         super().__init__()
 
+        config = OneRecConfig.get_instance()
         # Use config values with fallbacks to maintain backward compatibility
-        model_dim = model_dim or config.encoder_model_dim
-        num_encoder_layers = num_encoder_layers or config.num_encoder_layers
-        max_seq_len = max_seq_len or config.max_seq_len
-        num_heads = num_heads or config.encoder_num_heads
-        ff_dim = ff_dim or config.encoder_ff_dim
-        uid_vocab_size = uid_vocab_size or config.uid_vocab_size
-        vid_vocab_size = vid_vocab_size or config.vid_vocab_size
-        aid_vocab_size = aid_vocab_size or config.aid_vocab_size
-        vid_dim = vid_dim or config.vid_dim
-        aid_dim = aid_dim or config.aid_dim
-        tag_dim = tag_dim or config.tag_dim
-        ts_dim = ts_dim or config.ts_dim
-        playtime_dim = playtime_dim or config.playtime_dim
-        dur_dim = dur_dim or config.dur_dim
-        label_dim = label_dim or config.label_dim
 
-        self.model_dim = model_dim
-        self.num_encoder_layers = num_encoder_layers
+        self.model_dim = config.encoder_model_dim
+        self.num_encoder_layers = config.num_encoder_layers
 
         # Multi-scale pathways
-        self.user_static_pathway = UserStaticPathway(model_dim=model_dim,
-                 uid_vocab_size=uid_vocab_size,
+        self.user_static_pathway = UserStaticPathway(
                                                      )
-        self.short_term_pathway = ShortTermPathway(model_dim=model_dim,
-            uid_vocab_size=uid_vocab_size,
-            vid_vocab_size=vid_vocab_size,
-            aid_vocab_size=aid_vocab_size,
-            vid_dim = vid_dim,
-            aid_dim = aid_dim,
-            tag_dim = tag_dim,
-            ts_dim = ts_dim,
-            playtime_dim = playtime_dim,
-            dur_dim = dur_dim,
-            label_dim = label_dim,
+        self.short_term_pathway = ShortTermPathway(
         )
-        self.positive_feedback_pathway = PositiveFeedbackPathway(model_dim=model_dim,
-            uid_vocab_size=uid_vocab_size,
-            vid_vocab_size=vid_vocab_size,
-            aid_vocab_size=aid_vocab_size,
-            vid_dim = vid_dim,
-            aid_dim = aid_dim,
-            tag_dim = tag_dim,
-            ts_dim = ts_dim,
-            playtime_dim = playtime_dim,
-            dur_dim = dur_dim,
-            label_dim = label_dim,
-
-                                                                 )
-        self.lifelong_pathway = LifelongPathway(model_dim=model_dim,
-            uid_vocab_size=uid_vocab_size,
-            vid_vocab_size=vid_vocab_size,
-            aid_vocab_size=aid_vocab_size,
-            vid_dim = vid_dim,
-            aid_dim = aid_dim,
-            tag_dim = tag_dim,
-            ts_dim = ts_dim,
-            playtime_dim = playtime_dim,
-            dur_dim = dur_dim,
-            label_dim = label_dim,
+        self.positive_feedback_pathway = PositiveFeedbackPathway()
+        self.lifelong_pathway = LifelongPathway(
                                                 )
 
         # Positional embeddings
-        self.pos_embedding = nn.Embedding(max_seq_len, model_dim)
+        self.pos_embedding = nn.Embedding(config.max_seq_len, config.encoder_model_dim)
 
         # Transformer encoder layers
-        self.encoder_layers = nn.ModuleList([
-            TransformerEncoderLayer(model_dim, num_heads, ff_dim)
-            for _ in range(num_encoder_layers)
+        self.encoder_layers = nn.ModuleList([ 
+            TransformerEncoderLayer() for _ in range(config.num_encoder_layers)
         ])
 
         # Final layer norm
-        self.layer_norm = nn.LayerNorm(model_dim)
+        self.layer_norm = nn.LayerNorm(config.encoder_model_dim)
     
     def forward(self, 
                 user_features: Dict[str, torch.Tensor],

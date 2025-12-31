@@ -1,80 +1,58 @@
 """
 Final integration test for OneRec model
 """
+import os
+import sys
 import torch
 from onerec.model import OneRec
 from onerec.training import OneRecTrainer, OneRecDataset
 from torch.utils.data import DataLoader
+from onerec.config import OneRecConfig
 
+
+# Change working directory to the script's directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(script_dir)
 
 def test_onerec_integration():
     print("Testing OneRec integration...")
 
-    uid_vocab_size= 1000
-    vid_vocab_size= 1000
-    aid_vocab_size= 300 
-    
+    # Update config with test parameters
+    config = OneRecConfig.get_instance()
+    config.num_query_tokens = 4
+    config.num_qformer_layers = 4
+    config.num_rq_layers = 3
+    config.codebook_size = 16
+    config.multimodal_hidden_dim = 32
+    config.qformer_hidden_dim = 32
+    config.encoder_model_dim = 32
+    config.num_encoder_layers = 6
+    config.max_seq_len = 2500
+    config.encoder_num_heads = 8
+    config.encoder_ff_dim = 128
+    config.uid_vocab_size = 1000 
+    config.vid_vocab_size = 1000 
+    config.aid_vocab_size = 300 
+    config.vid_dim = 32
+    config.aid_dim = 32
+    config.tag_dim = 32
+    config.ts_dim = 32
+    config.playtime_dim = 32
+    config.dur_dim = 32
+    config.label_dim = 32
+    config.decoder_model_dim = 32
+    config.num_decoder_layers = 6
+    config.decoder_num_heads = 8
+    config.decoder_ff_dim = 128
+    config.num_experts = 8
+    config.top_k = 2
+    config.user_dim = 32
+    config.item_dim = 32
+    config.num_objectives = 5
+    config.num_industrial_objectives = 3
+
     # Initialize the complete OneRec model
-    # model = OneRec(
-    #     num_query_tokens=4,
-    #     num_qformer_layers=4,
-    #     num_rq_layers=3,
-    #     codebook_size=256,
-    #     multimodal_hidden_dim=512,
-    #     qformer_hidden_dim=512,
-    #     encoder_model_dim=512,
-    #     num_encoder_layers=6,
-    #     max_seq_len=2500,
-    #     encoder_num_heads=8,
-    #     encoder_ff_dim=2048,
-    #     decoder_model_dim=512,
-    #     num_decoder_layers=6,
-    #     decoder_num_heads=8,
-    #     decoder_ff_dim=2048,
-    #     num_experts=8,
-    #     top_k=2,
-    #     user_dim=512,
-    #     item_dim=512,
-    #     num_objectives=5,
-    #     num_industrial_objectives=3
-    # )
-
-    model = OneRec(
-        num_query_tokens=4,
-        num_qformer_layers=4,
-        num_rq_layers=3,
-        codebook_size=16,
-        multimodal_hidden_dim=32,
-        qformer_hidden_dim=32,
-        encoder_model_dim=32,
-        num_encoder_layers=6,
-        max_seq_len=2500,
-        encoder_num_heads=8,
-        encoder_ff_dim=128,
-
-        uid_vocab_size=uid_vocab_size,  
-        vid_vocab_size= vid_vocab_size,
-        aid_vocab_size= aid_vocab_size,
-        vid_dim = 32,
-        aid_dim = 32,
-        tag_dim = 32,
-        ts_dim = 32,
-        playtime_dim = 32,
-        dur_dim = 32,
-        label_dim = 32,
-
-        decoder_model_dim=32,
-        num_decoder_layers=6,
-        decoder_num_heads=8,
-        decoder_ff_dim=128,
-        num_experts=8,
-        top_k=2,
-        user_dim=32,
-        item_dim=32,
-
-        num_objectives=5,
-        num_industrial_objectives=3
-    )
+    model = OneRec()
     
     print(f"Model initialized successfully with {sum(p.numel() for p in model.parameters()):,} parameters")
     
@@ -89,17 +67,20 @@ def test_onerec_integration():
     seq_len_pos = 30
     seq_len_life = 50  # Before compression
     
+    # Get config values
+    config = OneRecConfig.get_instance()
+    
     # User static features
     user_features = {
-        'uid': torch.randint(0, uid_vocab_size, (batch_size,)),
+        'uid': torch.randint(0, config.uid_vocab_size, (batch_size,)),
         'gender': torch.randint(0, 3, (batch_size,)),
         'age': torch.randint(18, 80, (batch_size,))
     }
     
     # Short-term features
     short_term_features = {
-        'vid': torch.randint(0, vid_vocab_size, (batch_size, seq_len_short)),
-        'aid': torch.randint(0, aid_vocab_size, (batch_size, seq_len_short)),
+        'vid': torch.randint(0, config.vid_vocab_size, (batch_size, seq_len_short)),
+        'aid': torch.randint(0, config.aid_vocab_size, (batch_size, seq_len_short)),
         'tag': torch.randn(batch_size, seq_len_short, 100),
         'ts': torch.randn(batch_size, seq_len_short),
         'playtime': torch.randn(batch_size, seq_len_short),
@@ -109,8 +90,8 @@ def test_onerec_integration():
     
     # Positive feedback features
     pos_feedback_features = {
-        'vid': torch.randint(0, vid_vocab_size, (batch_size, seq_len_pos)),
-        'aid': torch.randint(0, aid_vocab_size, (batch_size, seq_len_pos)),
+        'vid': torch.randint(0, config.vid_vocab_size, (batch_size, seq_len_pos)),
+        'aid': torch.randint(0, config.aid_vocab_size, (batch_size, seq_len_pos)),
         'tag': torch.randn(batch_size, seq_len_pos, 100),
         'ts': torch.randn(batch_size, seq_len_pos),
         'playtime': torch.randn(batch_size, seq_len_pos),
@@ -120,8 +101,8 @@ def test_onerec_integration():
     
     # Lifelong features (compressed to 2000 before QFormer)
     lifelong_features = {
-        'vid': torch.randint(0, vid_vocab_size, (batch_size, seq_len_life)),
-        'aid': torch.randint(0, aid_vocab_size, (batch_size, seq_len_life)),
+        'vid': torch.randint(0, config.vid_vocab_size, (batch_size, seq_len_life)),
+        'aid': torch.randint(0, config.aid_vocab_size, (batch_size, seq_len_life)),
         'tag': torch.randn(batch_size, seq_len_life, 100),
         'ts': torch.randn(batch_size, seq_len_life),
         'playtime': torch.randn(batch_size, seq_len_life),
@@ -130,11 +111,11 @@ def test_onerec_integration():
     }
     
     # Target semantic IDs for training
-    target_semantic_ids = torch.randint(0, 256, (batch_size, 3))  # 3 RQ layers
+    target_semantic_ids = torch.randint(0, config.codebook_size, (batch_size, config.num_rq_layers))  # 3 RQ layers
     
     # Additional data for reward computation
-    industrial_metrics = torch.randn(batch_size, 3)
-    legal_ids_mask = torch.ones(batch_size, 3, 256).bool()
+    industrial_metrics = torch.randn(batch_size, config.num_industrial_objectives)
+    legal_ids_mask = torch.ones(batch_size, config.num_rq_layers, config.codebook_size).bool()
 
     print("Testing forward pass in training mode...")
     # Forward pass in training mode

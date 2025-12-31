@@ -19,8 +19,18 @@ class OneRecConfig:
                     cls._instance._initialized = False
         return cls._instance
 
+    @classmethod
+    def get_instance(cls) -> 'OneRecConfig':
+        """Get singleton instance of OneRecConfig"""
+        return cls()
+
     def __init__(self):
         if not self._initialized:
+
+            # base info
+            self.gender_dim = 64
+            self.age_dim = 64
+
             # Vocabulary sizes
             self.uid_vocab_size = 1000
             self.vid_vocab_size = 1000
@@ -42,21 +52,29 @@ class OneRecConfig:
             self.codebook_size = 256
             self.multimodal_hidden_dim = 512
             self.qformer_hidden_dim = 512
+
             self.encoder_model_dim = 512
             self.num_encoder_layers = 6
             self.max_seq_len = 2500
             self.encoder_num_heads = 8
             self.encoder_ff_dim = 2048
+
             self.decoder_model_dim = 512
             self.num_decoder_layers = 6
             self.decoder_num_heads = 8
             self.decoder_ff_dim = 2048
+
             self.num_experts = 8
             self.top_k = 2
             self.user_dim = 512
             self.item_dim = 512
             self.num_objectives = 5
             self.num_industrial_objectives = 3
+
+            ##PreferenceScoreTower
+            # self.hidden_dim: int = 1024,
+            self.num_objectives: int = 5,  # ctr, lvtr, ltr, vtr, etc.
+            self.tower_hidden_dim: int = 512 
 
             self._initialized = True
 

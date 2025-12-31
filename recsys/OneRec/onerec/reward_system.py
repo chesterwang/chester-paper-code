@@ -3,45 +3,38 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Optional, Tuple
 import math
-from .config import config
+from .config import OneRecConfig
 
 
 class PreferenceScoreTower(nn.Module):
     """
     Preference Score Tower for learning personalized fusion score
     """
-    def __init__(self, 
-                 user_dim: int = 512,
-                 item_dim: int = 512,
-                 hidden_dim: int = 1024,
-                 num_objectives: int = 5,  # ctr, lvtr, ltr, vtr, etc.
-                 tower_hidden_dim: int = 512):
+    def __init__(self):
         super().__init__()
         
-        self.user_dim = user_dim
-        self.item_dim = item_dim
-        self.hidden_dim = hidden_dim
-        self.num_objectives = num_objectives
-        
+        config = OneRecConfig.get_instance()
+
         # Separate towers for different objectives
         self.objective_towers = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(user_dim + item_dim, tower_hidden_dim),
+                nn.Linear(config.user_dim + config.item_dim, config.tower_hidden_dim),
                 nn.ReLU(),
-                nn.Linear(tower_hidden_dim, tower_hidden_dim // 2),
-                nn.ReLU(),
-                nn.Linear(tower_hidden_dim // 2, 1),
+                nn.Linear(config.tower_hidden_dim, config.tower_hidden_dim // 2),
                 nn.Sigmoid()
-            ) for _ in range(num_objectives)
+                # nn.ReLU(),
+                # nn.Linear(config.tower_hidden_dim // 2, 1),
+                # nn.Sigmoid()
+            ) for _ in range(config.num_objectives)
         ])
         
         # Final MLP to combine tower outputs
         self.final_mlp = nn.Sequential(
-            nn.Linear(user_dim + item_dim + num_objectives * tower_hidden_dim // 2, hidden_dim),
+            nn.Linear(config.user_dim + config.item_dim + config.num_objectives * config.tower_hidden_dim // 2, config.tower_hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.Linear(config.tower_hidden_dim, config.tower_hidden_dim // 2),
             nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1)
+            nn.Linear(config.tower_hidden_dim // 2, 1)
         )
         
     def forward(self, user_repr: torch.Tensor, item_repr: torch.Tensor) -> torch.Tensor:
@@ -143,9 +136,10 @@ class FormatReward(nn.Module):
     """
     Format reward for ensuring legal generation of semantic IDs
     """
-    def __init__(self, vocab_size: int = 256):
+    def __init__(self):
         super().__init__()
-        self.vocab_size = vocab_size
+
+        # self.vocab_size = vocab_size
     
     def forward(self, generated_ids: torch.Tensor, legal_ids_mask: torch.Tensor) -> torch.Tensor:
         """
@@ -203,34 +197,36 @@ class OneRecRewardSystem(nn.Module):
     Complete reward system for OneRec with preference alignment, format reward, and industrial reward
     """
     def __init__(self,
-                 user_dim: int = None,
-                 item_dim: int = None,
-                 vocab_size: int = None,
-                 num_rq_layers: int = None,
-                 num_objectives: int = None,
-                 num_industrial_objectives: int = None):
+    #              user_dim: int = None,
+    #              item_dim: int = None,
+    #              vocab_size: int = None,
+    #              num_rq_layers: int = None,
+    #              num_objectives: int = None,
+    #              num_industrial_objectives: int = None
+                 ):
         super().__init__()
 
-        # Use config values with fallbacks to maintain backward compatibility
-        user_dim = user_dim or config.user_dim
-        item_dim = item_dim or config.item_dim
-        vocab_size = vocab_size or config.codebook_size
-        num_rq_layers = num_rq_layers or config.num_rq_layers
-        num_objectives = num_objectives or config.num_objectives
-        num_industrial_objectives = num_industrial_objectives or config.num_industrial_objectives
+        # Get config values
+        config = OneRecConfig.get_instance()
+        
+        # Use provided values or config defaults
+        # user_dim = user_dim or config.user_dim
+        # item_dim = item_dim or config.item_dim
+        # vocab_size = vocab_size or config.codebook_size
+        # num_rq_layers = num_rq_layers or config.num_rq_layers
+        # num_objectives = num_objectives or config.num_objectives
+        # num_industrial_objectives = num_industrial_objectives or config.num_industrial_objectives
 
         # Preference reward components
-        self.preference_tower = PreferenceScoreTower(
-            user_dim=user_dim,
-            item_dim=item_dim,
-            num_objectives=num_objectives
-        )
+        self.preference_tower = PreferenceScoreTower()
 
         # Format reward
-        self.format_reward = FormatReward(vocab_size=vocab_size)
+        self.format_reward = FormatReward(
+            # vocab_size=config.codebook_size
+            )
 
         # Industrial reward
-        self.industrial_reward = IndustrialReward(num_industrial_objectives=num_industrial_objectives)
+        self.industrial_reward = IndustrialReward(num_industrial_objectives=config.num_industrial_objectives)
 
         # ECPO optimizer
         self.ecpo_optimizer = EarlyClippedGRPO()
